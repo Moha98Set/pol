@@ -1,0 +1,57 @@
+[Unit]
+Description=Polymarket live arbitrage engine (WebSocket, observe-only)
+Documentation=file:/opt/polly/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polly
+Group=polly
+WorkingDirectory=/opt/polly
+
+# Every setting the pipeline reads comes from here. Nothing reads a .env
+# file: load_dotenv() is never called outside polly.py, so the process
+# environment is the only channel that works.
+EnvironmentFile=/etc/polly/polly.env
+
+# ProtectSystem=strict makes /opt/polly read-only, so let Python not try
+# to write __pycache__ there on every start.
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# -u keeps the log line-buffered, so journalctl -f shows a running scan
+# as it happens rather than in blocks when the pipe flushes.
+ExecStart=/opt/polly/venv/bin/python -u live_engine.py
+
+Restart=always
+RestartSec=30
+
+# live_engine exits on KeyboardInterrupt; SIGTERM is not trapped, so this
+# is a hard stop. Nothing is lost — signals are written as they are found.
+# Shorter timeout because there is no cleanup to wait for.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polly-live
+
+# --- Hardening ---------------------------------------------------------
+# The process needs outbound HTTPS and one writable directory. Everything
+# else is denied.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=/var/lib/polly
+
+[Install]
+WantedBy=multi-user.target

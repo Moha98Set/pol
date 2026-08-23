@@ -1,0 +1,9 @@
+# Full development set. The server installs deploy/requirements-server.txt
+# instead — the two services need only requests and websockets.
+pandas==3.0.5
+py_clob_client==0.34.6
+pytest==9.1.1
+python-dotenv==1.2.3
+Requests==2.34.2
+tqdm==4.70.0
+websockets==17.0.1

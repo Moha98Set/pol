@@ -1,0 +1,14 @@
+# Observe-only server: arb_monitor.py + live_engine.py
+#
+# The core pipeline imports exactly two third-party packages. pandas and
+# tqdm appear in the root requirements.txt only for the standalone
+# analysis scripts (slippage_analyzer*, polymarket_report, verify_arb),
+# none of which run as a service — installing them here would add ~100MB
+# to the image for code that never executes.
+#
+# py_clob_client is likewise absent: executor.py imports it lazily, inside
+# the function that signs orders, so nothing on an observe-only host ever
+# reaches that import.
+
+requests==2.34.2
+websockets==17.0.1

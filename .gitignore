@@ -1,0 +1,35 @@
+# Secrets — never commit. On the server these live in /etc/polly/polly.env
+.env
+*.env
+!*.env.example
+
+# Virtualenv — rebuilt per platform, never transferred
+venv/
+.venv/
+env/
+
+# Databases and their WAL sidecars
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime output
+*.log
+recordings/
+STOP
+
+# Generated reports
+polymarket_report/
+polymarket_report0/
+polymarket_report1/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Tooling
+.idea/
+.vscode/
+.DS_Store
+get-pip.py
