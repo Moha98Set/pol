@@ -202,10 +202,27 @@ ssh -L 8971:127.0.0.1:8971 root@<server>
 Each analyst gets their own login, because a login record that says
 `analyst` every time answers nothing about who is using the tool.
 
+The account CLI is run by hand, so unlike the service it does not get the
+unit's `EnvironmentFile`. Load the same settings, or it resolves the
+account database beside the code in `/opt/polly` — which is read-only to
+the service user, and which the running dashboard would never read even if
+it were writable:
+
 ```bash
-sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --add-user sara --name "Sara M"
-sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --list-users
-sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --logins 50
+sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; set +a; \
+    /opt/polly/venv/bin/python /opt/polly/dashboard.py --add-user sara --name "Sara M"'
+```
+
+Every account command prints the file it is using, so a mismatch is
+visible rather than silent. `--auth-db /var/lib/polly/dashboard.db` names
+it explicitly if you would rather not source the file.
+
+```bash
+sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; set +a; \
+    /opt/polly/venv/bin/python /opt/polly/dashboard.py --list-users'
+
+sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; set +a; \
+    /opt/polly/venv/bin/python /opt/polly/dashboard.py --logins 50'
 ```
 
 Accounts live in `/var/lib/polly/dashboard.db`, separate from the market

@@ -60,6 +60,38 @@ DB_PATH = Path(config.DB_PATH) if config.DB_PATH else (
 AUTH_DB_PATH = Path(os.getenv("POLLY_DASH_AUTH_DB") or
                     (DB_PATH.parent / "dashboard.db"))
 
+
+def _check_auth_db_usable(path: Path):
+    """
+    Fail with the reason rather than with sqlite3's "unable to open".
+
+    The account CLI is run by hand, so it does not get the unit's
+    EnvironmentFile. Without DB_PATH the auth database resolves next to the
+    code in /opt/polly, which the service user cannot write — and if it
+    ever could, accounts would be created in a file the running service
+    never reads, which is worse than an error.
+    """
+    if path.exists():
+        return
+    parent = path.parent
+    if not parent.exists():
+        raise SystemExit(
+            f"مسیر {parent} وجود ندارد.\n"
+            f"احتمالاً فایل تنظیمات لود نشده. این‌طور اجرا کنید:\n\n"
+            f"  sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; "
+            f"set +a; \\\n"
+            f"      /opt/polly/venv/bin/python /opt/polly/dashboard.py ...'")
+    if not os.access(parent, os.W_OK):
+        raise SystemExit(
+            f"اجازه‌ی نوشتن در {parent} نیست، پس {path.name} ساخته نمی‌شود.\n\n"
+            f"اگر DB_PATH تنظیم نشده باشد، این مسیر کنار کد حساب می‌شود که "
+            f"عمداً فقط‌خواندنی است.\n"
+            f"فایل تنظیمات را لود کنید:\n\n"
+            f"  sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; "
+            f"set +a; \\\n"
+            f"      /opt/polly/venv/bin/python /opt/polly/dashboard.py ...'\n\n"
+            f"یا مسیر را صریح بدهید:  --auth-db /var/lib/polly/dashboard.db")
+
 DASH_USER = os.getenv("POLLY_DASH_USER", "")
 DASH_PASSWORD_HASH = os.getenv("POLLY_DASH_PASSWORD_HASH", "")
 SECRET_KEY = os.getenv("POLLY_DASH_SECRET_KEY", "")
@@ -879,6 +911,9 @@ def main():
     parser.add_argument("--disable-user", metavar="USERNAME")
     parser.add_argument("--enable-user", metavar="USERNAME")
     parser.add_argument("--list-users", action="store_true")
+    parser.add_argument("--auth-db", metavar="PATH",
+                        help="account database (default: beside the market "
+                             "database named by DB_PATH)")
     parser.add_argument("--logins", type=int, nargs="?", const=30,
                         metavar="N", help="print the last N login attempts")
     parser.add_argument("--hash-password", action="store_true",
@@ -900,7 +935,13 @@ def main():
                      args.list_users or args.logins is not None)
 
     if account_flags:
-        conn = dashauth.connect(AUTH_DB_PATH)
+        auth_path = Path(args.auth_db) if args.auth_db else AUTH_DB_PATH
+        # Printed every time: accounts written to one file while the
+        # service reads another is a silent failure, and the path is the
+        # only thing that makes it visible.
+        print(f"[dashboard] حساب‌ها در: {auth_path}")
+        _check_auth_db_usable(auth_path)
+        conn = dashauth.connect(auth_path)
 
         if args.add_user:
             if dashauth.get_user(conn, args.add_user):

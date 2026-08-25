@@ -193,3 +193,52 @@ def test_a_locked_out_attempt_is_itself_recorded(users):
 
     reasons = [r["reason"] for r in dashauth.recent_logins(users)]
     assert "too_many_for_user" in reasons
+
+
+# =====================================================================
+# Where the account database lives
+# =====================================================================
+
+
+def test_accounts_land_in_the_file_that_was_asked_for(tmp_path):
+    """
+    The service reads the path DB_PATH implies; the CLI is run by hand and
+    does not get the unit's environment. If the two ever disagree, accounts
+    are created in a file nothing reads — so the path is explicit and the
+    connection is proved to write where it was told.
+    """
+    target = tmp_path / "nested" / "dashboard.db"
+    target.parent.mkdir()
+
+    conn = dashauth.connect(target)
+    dashauth.add_user(conn, "sara", "a-long-enough-secret")
+    conn.close()
+
+    assert target.exists()
+    reopened = dashauth.connect(target)
+    assert dashauth.get_user(reopened, "sara") is not None
+    reopened.close()
+
+
+def test_an_unwritable_location_is_reported_before_sqlite_is_touched(tmp_path):
+    import dashboard
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o555)
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            dashboard._check_auth_db_usable(locked / "dashboard.db")
+        # the message has to carry the fix, not just the failure
+        assert "polly.env" in str(excinfo.value)
+        assert "--auth-db" in str(excinfo.value)
+    finally:
+        locked.chmod(0o755)
+
+
+def test_a_missing_parent_directory_is_named(tmp_path):
+    import dashboard
+
+    with pytest.raises(SystemExit) as excinfo:
+        dashboard._check_auth_db_usable(tmp_path / "absent" / "dashboard.db")
+    assert "absent" in str(excinfo.value)
