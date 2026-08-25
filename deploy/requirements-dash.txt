@@ -1,0 +1,14 @@
+# Dashboard only. Installed alongside requirements-server.txt.
+#
+# Flask brings Jinja2, Werkzeug, click, itsdangerous and blinker — about
+# 6MB. Nothing else is needed: password hashing is hashlib.scrypt from the
+# standard library, and there is no ORM because the queries are plain
+# SELECTs against a schema this repo owns.
+#
+# waitress serves it. Flask's built-in server says "do not use this in a
+# production deployment" on every start and means it — single process, no
+# request timeouts, no connection limits. waitress is pure Python, so it
+# adds a real WSGI server without a compiler or a C dependency.
+
+Flask==3.1.3
+waitress==3.0.2

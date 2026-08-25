@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}داشبورد آربیتراژ{% endblock %}</title>
+<style>
+/* Vazirmatn, served from this host rather than from Google Fonts: the
+   dashboard must render identically on a server with no outbound access
+   to a font CDN, and a blocked stylesheet would otherwise fall back to
+   whatever the OS has for Persian. Its Latin and Persian are drawn as one
+   family, so mixed titles like "Fed Decision in September?" sit on the
+   same baseline and weight as the Persian around them.
+   font-display:swap so text is readable before the font arrives. */
+@font-face{
+  font-family:"Vazirmatn"; font-style:normal; font-weight:400; font-display:swap;
+  src:url("/static/fonts/Vazirmatn-400.woff2") format("woff2");
+}
+@font-face{
+  font-family:"Vazirmatn"; font-style:normal; font-weight:500; font-display:swap;
+  src:url("/static/fonts/Vazirmatn-500.woff2") format("woff2");
+}
+@font-face{
+  font-family:"Vazirmatn"; font-style:normal; font-weight:700; font-display:swap;
+  src:url("/static/fonts/Vazirmatn-700.woff2") format("woff2");
+}
+
+/* Light is the base; dark only redefines the tokens. Declaring both on
+   :root and under the media query means the toggle wins in either
+   direction and the untouched default still follows the OS. */
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f0f2f5;
+  --text:#111826; --muted:#5b6676; --border:#dde2e9;
+  --accent:#1f6feb; --accent-soft:#e7f0fe;
+  --good:#12805c; --good-soft:#e3f5ee;
+  --warn:#9a6700; --warn-soft:#fff4d6;
+  --bad:#b3261e;  --bad-soft:#fdeceb;
+  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.1);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1117; --surface:#161b22; --surface-2:#1c232c;
+    --text:#e6edf3; --muted:#9198a1; --border:#2a313c;
+    --accent:#4c8dff; --accent-soft:#16243d;
+    --good:#3fb950; --good-soft:#12261a;
+    --warn:#d29922; --warn-soft:#2b2413;
+    --bad:#f85149;  --bad-soft:#2d1618;
+    --shadow:0 1px 2px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1117; --surface:#161b22; --surface-2:#1c232c;
+  --text:#e6edf3; --muted:#9198a1; --border:#2a313c;
+  --accent:#4c8dff; --accent-soft:#16243d;
+  --good:#3fb950; --good-soft:#12261a;
+  --warn:#d29922; --warn-soft:#2b2413;
+  --bad:#f85149;  --bad-soft:#2d1618;
+  --shadow:0 1px 2px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
+  font-size:15px; line-height:1.75;
+}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Latin numerals inside a Persian page: prices and edges are compared
+   digit by digit, and mixing numeral systems makes columns unreadable.
+   display:inline-block belongs only on the inline uses — setting it on a
+   <td class="num"> stops that cell being a table cell at all, which drops
+   it out of the row and onto a line of its own. */
+/* Vazirmatn's own tabular figures rather than a monospace face: digits
+   still line up column to column, but prices stay in the same family as
+   the text beside them instead of switching typeface mid-row. */
+.num{font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1;
+     direction:ltr}
+span.num,a.num{display:inline-block}
+td.num,th.num{text-align:left}
+
+header{
+  background:var(--surface); border-bottom:1px solid var(--border);
+  position:sticky; top:0; z-index:10;
+}
+.bar{display:flex; align-items:center; gap:18px; padding:10px 22px; flex-wrap:wrap}
+.brand{font-weight:700; font-size:17px; margin-inline-end:auto}
+.brand small{color:var(--muted); font-weight:400; font-size:13px}
+nav{display:flex; gap:4px; flex-wrap:wrap}
+nav a{
+  padding:7px 13px; border-radius:8px; color:var(--muted); font-size:14px;
+}
+nav a:hover{background:var(--surface-2); text-decoration:none}
+nav a.on{background:var(--accent-soft); color:var(--accent); font-weight:600}
+
+main{max-width:1280px; margin:0 auto; padding:24px 22px 60px}
+h1{font-size:22px; margin:0 0 4px}
+h2{font-size:17px; margin:28px 0 12px}
+.sub{color:var(--muted); font-size:14px; margin:0 0 22px}
+
+.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:14px; margin-bottom:26px}
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:15px 17px; box-shadow:var(--shadow);
+}
+.card .k{color:var(--muted); font-size:13px}
+.card .v{font-size:25px; font-weight:700; margin-top:3px}
+.card .v.good{color:var(--good)} .card .v.bad{color:var(--bad)} .card .v.warn{color:var(--warn)}
+.card .note{color:var(--muted); font-size:12px; margin-top:2px}
+
+.panel{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  box-shadow:var(--shadow); overflow:hidden; margin-bottom:24px;
+}
+.panel > h2{margin:0; padding:14px 17px; border-bottom:1px solid var(--border); font-size:15px}
+.panel .body{padding:17px}
+
+.scroll{overflow-x:auto}
+table{width:100%; border-collapse:collapse; font-size:14px}
+th,td{padding:10px 13px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
+th{background:var(--surface-2); color:var(--muted); font-weight:600; font-size:13px; position:sticky; top:0}
+tbody tr:hover{background:var(--surface-2)}
+td.wrap{white-space:normal; min-width:260px; max-width:440px}
+tr:last-child td{border-bottom:none}
+
+.tag{
+  display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px;
+  background:var(--surface-2); color:var(--muted); border:1px solid var(--border);
+  white-space:nowrap;
+}
+.tag.good{background:var(--good-soft); color:var(--good); border-color:transparent}
+.tag.warn{background:var(--warn-soft); color:var(--warn); border-color:transparent}
+.tag.bad{background:var(--bad-soft); color:var(--bad); border-color:transparent}
+.tag.info{background:var(--accent-soft); color:var(--accent); border-color:transparent}
+.tag[title]{cursor:help; border-bottom:1px dotted currentColor}
+
+form.filters{display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:18px}
+.field{display:flex; flex-direction:column; gap:4px}
+.field label{font-size:12px; color:var(--muted)}
+select,input[type=text],input[type=password],input[type=number]{
+  background:var(--surface); color:var(--text); border:1px solid var(--border);
+  border-radius:8px; padding:8px 11px; font:inherit; font-size:14px; min-width:130px;
+}
+button,.btn{
+  background:var(--accent); color:#fff; border:0; border-radius:8px;
+  padding:9px 17px; font:inherit; font-size:14px; cursor:pointer;
+}
+button.ghost,.btn.ghost{background:var(--surface-2); color:var(--text); border:1px solid var(--border)}
+button:hover,.btn:hover{opacity:.9; text-decoration:none}
+
+.pager{display:flex; gap:8px; align-items:center; justify-content:center; margin-top:20px; color:var(--muted); font-size:14px}
+
+.empty{padding:44px 20px; text-align:center; color:var(--muted)}
+.empty .big{font-size:16px; color:var(--text); margin-bottom:6px}
+
+.flash{background:var(--bad-soft); color:var(--bad); padding:11px 15px; border-radius:9px; margin-bottom:16px; font-size:14px}
+
+.bar-row{display:flex; align-items:center; gap:11px; margin:7px 0}
+.bar-row .label{min-width:190px; font-size:14px}
+.bar-row .track{flex:1; background:var(--surface-2); border-radius:5px; height:9px; overflow:hidden}
+.bar-row .fill{height:100%; background:var(--accent); border-radius:5px}
+.bar-row .n{min-width:92px; color:var(--muted); font-size:13px; text-align:left}
+
+pre.logs{
+  background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
+  padding:14px; overflow-x:auto; font-size:12.5px; line-height:1.6;
+  direction:ltr; text-align:left; max-height:640px; margin:0;
+  font-family:"SF Mono",Menlo,Consolas,monospace;
+}
+
+.spark{display:block; width:100%; height:60px}
+.dl{display:grid; grid-template-columns:auto 1fr; gap:8px 20px; font-size:14px}
+.dl dt{color:var(--muted)}
+.dl dd{margin:0}
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">داشبورد آربیتراژ <small>پالی‌مارکت</small></div>
+    <nav>
+      {% set p = request.path %}
+      <a href="{{ url_for('overview') }}"      class="{{ 'on' if p == '/' }}">خلاصه</a>
+      <a href="{{ url_for('opportunities') }}" class="{{ 'on' if p.startswith('/opportunit') }}">فرصت‌ها</a>
+      <a href="{{ url_for('near_misses') }}"   class="{{ 'on' if p.startswith('/near') }}">نزدیک‌ترین‌ها</a>
+      <a href="{{ url_for('markets') }}"       class="{{ 'on' if p.startswith('/market') }}">بازارها</a>
+      <a href="{{ url_for('rejected') }}"      class="{{ 'on' if p.startswith('/rejected') }}">ردشده‌ها</a>
+      <a href="{{ url_for('funnel') }}"        class="{{ 'on' if p.startswith('/funnel') }}">قیف</a>
+      <a href="{{ url_for('system') }}"        class="{{ 'on' if p.startswith('/system') }}">سیستم</a>
+      <a href="{{ url_for('glossary_page') }}" class="{{ 'on' if p.startswith('/glossary') }}">واژه‌نامه</a>
+    </nav>
+    <button class="ghost" onclick="toggleTheme()" id="themeBtn" title="تغییر تم">تم</button>
+    <a class="btn ghost" href="{{ url_for('logout') }}">خروج</a>
+  </div>
+</header>
+
+<main>
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block body %}{% endblock %}
+</main>
+
+<script>
+// Applied before paint in <head> would avoid a flash, but the toggle is
+// cheap enough here and keeps all the styling in one place.
+(function(){
+  var saved = localStorage.getItem("polly-theme");
+  if (saved) document.documentElement.setAttribute("data-theme", saved);
+})();
+function toggleTheme(){
+  var el = document.documentElement;
+  var now = el.getAttribute("data-theme");
+  if (!now) {
+    now = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  var next = now === "dark" ? "light" : "dark";
+  el.setAttribute("data-theme", next);
+  localStorage.setItem("polly-theme", next);
+}
+</script>
+</body>
+</html>

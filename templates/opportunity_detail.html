@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ opp.event_title }} — فرصت{% endblock %}
+{% block body %}
+
+<h1>{{ opp.event_title or opp.event_slug }}</h1>
+<p class="sub">
+  فرصت #{{ opp.id }} — {{ opp.found_at|ago }}
+  {% if opp.url %}· <a href="{{ opp.url }}" target="_blank" rel="noopener">مشاهده در پالی‌مارکت</a>{% endif %}
+</p>
+
+<div class="cards">
+  <div class="card"><div class="k">لبه‌ی خالص</div><div class="v num good">{{ opp.net_edge|pct(3) }}</div>
+       <div class="note">ناخالص {{ opp.gross_edge|pct(3) }}</div></div>
+  <div class="card"><div class="k">مجموع بهترین قیمت‌ها</div><div class="v num">{{ opp.sum_best_asks|fa_num(4) }}</div>
+       <div class="note">پرداخت تضمینی {{ opp.payout_per_basket or 1 }} دلار</div></div>
+  <div class="card"><div class="k">سود در بهترین حالت</div><div class="v num good">{{ opp.best_profit|money(2) }}</div>
+       <div class="note">با سرمایه‌ی {{ opp.best_capital|money }}</div></div>
+  <div class="card"><div class="k">بازده</div><div class="v num">{{ opp.best_roi_pct|fa_num(2) }}٪</div></div>
+  <div class="card"><div class="k">کارمزد دسته</div><div class="v num">{{ opp.fee_rate|pct(1) }}</div>
+       <div class="note">{{ opp.category or '—' }}</div></div>
+  <div class="card"><div class="k">حجم ۲۴ ساعته</div><div class="v num">{{ opp.volume_24h|money }}</div></div>
+</div>
+
+{% if suspicions %}
+<div class="panel"><h2>پرچم‌های هشدار</h2><div class="body">
+  {% for s in suspicions %}
+    <div class="bar-row"><span class="tag warn">{{ reason(s)[0] }}</span>
+      <span style="font-size:14px;color:var(--muted)">{{ reason(s)[1] }}</span></div>
+  {% endfor %}
+</div></div>
+{% endif %}
+
+{% if legs %}
+<div class="panel">
+  <h2>تفکیک پاها — این‌ها با هم خریده می‌شوند</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>#</th><th>گزینه</th><th>بهترین قیمت فروش</th><th>حجم موجود</th></tr></thead>
+      <tbody>
+        {% for leg in legs %}
+        <tr>
+          <td class="num">{{ loop.index }}</td>
+          <td class="wrap">{{ leg.outcome or leg.question or '—' }}</td>
+          <td class="num">{{ leg.best_ask|fa_num(4) if leg.best_ask is defined else '—' }}</td>
+          <td class="num">{{ leg.best_ask_size|fa_num(0) if leg.best_ask_size is defined else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if curve %}
+<div class="panel">
+  <h2>منحنی اسلیپیج — سود در سرمایه‌های مختلف</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0">
+      هرچه سرمایه بیشتر شود، باید عمیق‌تر در دفتر سفارش پیش رفت و قیمت میانگین بدتر می‌شود.
+      این جدول نشان می‌دهد سود تا کجا مقیاس می‌پذیرد.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>سرمایه</th><th>سهم</th><th>هزینه‌ی واقعی</th><th>سود</th><th>بازده</th></tr></thead>
+        <tbody>
+          {% for p in curve %}
+          <tr>
+            <td class="num">{{ p.capital|money }}</td>
+            <td class="num">{{ p.shares|fa_num(1) if p.shares is defined else '—' }}</td>
+            <td class="num">{{ p.real_cost|money(2) if p.real_cost is defined else '—' }}</td>
+            <td class="num {{ 'good' if p.profit and p.profit > 0 else 'bad' }}">{{ p.profit|money(2) }}</td>
+            <td class="num">{{ p.roi|fa_num(2) }}٪</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<p><a class="btn ghost" href="{{ url_for('opportunities') }}">بازگشت به فهرست</a></p>
+
+{% endblock %}

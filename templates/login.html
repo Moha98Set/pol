@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ورود — داشبورد آربیتراژ</title>
+<style>
+:root{--bg:#f6f7f9;--surface:#fff;--text:#111826;--muted:#5b6676;--border:#dde2e9;--accent:#1f6feb;--bad:#b3261e;--bad-soft:#fdeceb}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1117;--surface:#161b22;--text:#e6edf3;--muted:#9198a1;--border:#2a313c;--accent:#4c8dff;--bad:#f85149;--bad-soft:#2d1618}}
+:root[data-theme="dark"]{--bg:#0e1117;--surface:#161b22;--text:#e6edf3;--muted:#9198a1;--border:#2a313c;--accent:#4c8dff;--bad:#f85149;--bad-soft:#2d1618}
+@font-face{font-family:"Vazirmatn";font-style:normal;font-weight:400;font-display:swap;
+           src:url("/static/fonts/Vazirmatn-400.woff2") format("woff2")}
+@font-face{font-family:"Vazirmatn";font-style:normal;font-weight:700;font-display:swap;
+           src:url("/static/fonts/Vazirmatn-700.woff2") format("woff2")}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+     background:var(--bg);color:var(--text);
+     font-family:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;padding:20px}
+.box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px;width:100%;max-width:370px;
+     box-shadow:0 4px 14px rgba(16,24,40,.08)}
+h1{font-size:19px;margin:0 0 5px}
+p.sub{color:var(--muted);font-size:14px;margin:0 0 22px}
+label{display:block;font-size:13px;color:var(--muted);margin:14px 0 5px}
+input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;
+      background:var(--bg);color:var(--text);font:inherit;font-size:15px}
+button{width:100%;margin-top:22px;padding:11px;border:0;border-radius:9px;background:var(--accent);
+       color:#fff;font:inherit;font-size:15px;cursor:pointer}
+button:hover{opacity:.92}
+.flash{background:var(--bad-soft);color:var(--bad);padding:10px 13px;border-radius:8px;font-size:14px;margin-bottom:16px}
+.note{color:var(--muted);font-size:12px;margin-top:20px;line-height:1.6}
+</style>
+</head>
+<body>
+<form class="box" method="post">
+  <h1>داشبورد آربیتراژ</h1>
+  <p class="sub">برای ادامه وارد شوید.</p>
+
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+
+  <label for="u">نام کاربری</label>
+  <input id="u" name="username" autocomplete="username" autofocus required>
+
+  <label for="p">رمز عبور</label>
+  <input id="p" name="password" type="password" autocomplete="current-password" required>
+
+  <button type="submit">ورود</button>
+
+  <p class="note">این اتصال رمزنگاری‌نشده است. رمز خود را از شبکه‌ی عمومی یا وای‌فای مشترک وارد نکنید.</p>
+</form>
+<script>
+(function(){var s=localStorage.getItem("polly-theme");if(s)document.documentElement.setAttribute("data-theme",s);})();
+</script>
+</body>
+</html>

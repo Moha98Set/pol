@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}فرصت‌ها — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>فرصت‌ها</h1>
+<p class="sub">
+  بازارهایی که همه‌ی بررسی‌ها را گذراندند و پس از کارمزد و اسلیپیج سود مثبت داشتند.
+</p>
+
+{% if total == 0 %}
+<div class="panel"><div class="empty">
+  <div class="big">هنوز فرصتی ثبت نشده است.</div>
+  <div style="max-width:560px;margin:10px auto 0;line-height:1.9">
+    این یک خطا نیست. آربیتراژ واقعی روی بازارهای نقدشونده نادر و کوتاه‌عمر است —
+    اگر ساده بود، دیگران زودتر برش می‌داشتند. سلامت سیستم را از
+    <a href="{{ url_for('near_misses') }}">نزدیک‌ترین‌ها</a> بسنجید:
+    اگر آنجا داده هست، خط لوله کار می‌کند و بازار صرفاً لبه‌ای نمی‌دهد.
+  </div>
+</div></div>
+{% else %}
+<div class="panel">
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>نوع</th><th>گزینه</th><th>مجموع قیمت</th>
+        <th>لبه‌ی خالص</th><th>کارمزد</th><th>سود</th><th>سرمایه</th><th>بازده</th><th>زمان</th>
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        <tr>
+          <td class="wrap"><a href="{{ url_for('opportunity_detail', opp_id=r.id) }}">{{ r.event_title or r.event_slug }}</a></td>
+          <td>{{ 'دوگانه' if r.market_type == 'binary' else 'چندگانه' }}</td>
+          <td class="num">{{ r.num_outcomes }}</td>
+          <td class="num">{{ r.sum_best_asks|fa_num(4) }}</td>
+          <td class="num good">{{ r.net_edge|pct(3) }}</td>
+          <td class="num">{{ r.fee_rate|pct(1) }}</td>
+          <td class="num good">{{ r.best_profit|money(2) }}</td>
+          <td class="num">{{ r.best_capital|money }}</td>
+          <td class="num">{{ r.best_roi_pct|fa_num(2) }}٪</td>
+          <td title="{{ r.found_at }}">{{ r.found_at|ago }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% include "_pager.html" %}
+{% endif %}
+
+{% endblock %}

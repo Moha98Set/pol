@@ -53,6 +53,57 @@ def _request_stop(signum, _frame):
     STOP.set()
 
 
+def verdict_row(event, stage, outcome, verdict, *, group=None, result=None,
+                code=None, detail=None) -> dict:
+    """
+    Flatten one event's fate into a row for `event_verdicts`.
+
+    The three sources are layered deliberately: `event` is always present,
+    `group` exists only once the pre-filter has accepted it, and `result`
+    only once the books have been walked. Later layers overwrite earlier
+    ones, so a row carries the most that was known when the event stopped.
+    """
+    row = {
+        "event_slug": event.get("slug"),
+        "event_title": event.get("title"),
+        "stage": stage,
+        "outcome": outcome,
+        # `verdict is not None`, never `if verdict`: Verdict.__bool__ returns
+        # .ok, so every rejecting verdict — precisely the ones whose code we
+        # are here to record — is falsy.
+        "code": code or (verdict.code if verdict is not None else "unknown"),
+        "detail": detail if detail is not None else (
+            verdict.detail if verdict is not None else ""),
+        "suspicions": list(verdict.suspicions) if verdict is not None else [],
+        "url": f"https://polymarket.com/event/{event.get('slug')}",
+    }
+
+    if group is not None:
+        row.update(
+            market_type="binary" if group["is_binary"] else "multi",
+            num_outcomes=len(group["markets"]),
+            volume_24h=group["volume"],
+            fee_rate=group["fee_rate"],
+            fee_category=group["fee_category"],
+            suspicions=list(group.get("suspicions") or []),
+        )
+
+    if result is not None:
+        row.update(
+            market_type=result.get("market_type", row.get("market_type")),
+            num_outcomes=result.get("num_outcomes", row.get("num_outcomes")),
+            volume_24h=result.get("volume_24h", row.get("volume_24h")),
+            category=result.get("category"),
+            sum_best_asks=result.get("sum_best_asks"),
+            gross_edge=result.get("gross_edge"),
+            net_edge=result.get("net_edge"),
+            fee_rate=result.get("fee_rate", row.get("fee_rate")),
+            suspicions=list(result.get("suspicions") or row["suspicions"]),
+        )
+
+    return row
+
+
 def run_scan(db) -> tuple:
     """One full scan cycle. Returns (opportunities_found, near_misses_saved)."""
     scan_id = dblib.start_scan(db)
@@ -74,10 +125,16 @@ def run_scan(db) -> tuple:
     # explanation is the hardest thing in this pipeline to debug.
     prefilter_start = time.perf_counter()
     groups = []
+    # The funnel counts reasons; this keeps the identity behind each one, so
+    # "which markets did we skip, and why" is answerable afterwards. One row
+    # per event, appended where that event comes to rest.
+    verdicts = []
     for event in events:
         group, verdict = scanner.prefilter_event_verbose(event)
         if group is None:
             funnel.reject("prefilter", verdict.code)
+            verdicts.append(verdict_row(event, "prefilter", "rejected",
+                                        verdict))
         else:
             groups.append(group)
             funnel.suspect(group.get("suspicions", []))
@@ -126,6 +183,9 @@ def run_scan(db) -> tuple:
             log.error("scan failed", exc_info=True, extra=fields(
                 scan_id=scan_id, stage="error", event_slug=slug,
                 error=f"{type(e).__name__}: {e}"))
+            verdicts.append(verdict_row(
+                group["event"], "error", "error", None, group=group,
+                code="scan_error", detail=f"{type(e).__name__}: {e}"))
             continue
 
         if not result:
@@ -133,9 +193,15 @@ def run_scan(db) -> tuple:
             # implausible price, a crossed book, or simply no edge worth a
             # near-miss row
             funnel.reject("book", verdict.code)
+            verdicts.append(verdict_row(group["event"], "book", "rejected",
+                                        verdict, group=group))
             continue
 
         funnel.suspect(result.get("suspicions", []))
+        verdicts.append(verdict_row(
+            group["event"],
+            "edge" if result["kind"] == "near_miss" else "opportunity",
+            result["kind"], verdict, group=group, result=result))
 
         if result["kind"] == "opportunity":
             dblib.save_opportunity(db, scan_id, result)
@@ -161,6 +227,11 @@ def run_scan(db) -> tuple:
     if scanner.RECORDER is not None:
         scanner.RECORDER.close()
         scanner.RECORDER = None
+
+    dblib.save_event_verdicts(db, scan_id, verdicts)
+    pruned = dblib.prune_event_verdicts(db, config.VERDICT_RETENTION_SCANS)
+    log.info("verdicts stored", extra=fields(
+        scan_id=scan_id, stage="verdicts", rows=len(verdicts), pruned=pruned))
 
     # keep only the best near misses (closest to arb)
     near_misses.sort(key=lambda x: x["net_edge"], reverse=True)

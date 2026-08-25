@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>{{ title }}</h1>
+<p class="sub">
+  {{ '{:,}'.format(total) }} بازار
+  {% if request.args.get('scan') %}در اسکن #{{ request.args.get('scan') }}{% else %}در آخرین اسکن{% endif %}.
+  هر ردیف یک رویداد است با دلیلی که سرنوشتش را تعیین کرد.
+</p>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="scan">اسکن</label>
+    <select id="scan" name="scan">
+      <option value="">آخرین اسکن</option>
+      {% for sid in scans %}
+        <option value="{{ sid }}" {{ 'selected' if request.args.get('scan')|int == sid }}>#{{ sid }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="code">دلیل</label>
+    <select id="code" name="code">
+      <option value="">همه</option>
+      {% for c in codes %}
+        <option value="{{ c.code }}" {{ 'selected' if request.args.get('code') == c.code }}>
+          {{ c.code|reason_label }} ({{ c.n }})
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if show_outcome_filter %}
+  <div class="field">
+    <label for="outcome">نتیجه</label>
+    <select id="outcome" name="outcome">
+      <option value="">همه</option>
+      {% for o in ['opportunity','near_miss','rejected','error'] %}
+        <option value="{{ o }}" {{ 'selected' if request.args.get('outcome') == o }}>{{ o|outcome_label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
+  <div class="field">
+    <label for="q">جستجو در عنوان</label>
+    <input id="q" name="q" type="text" value="{{ request.args.get('q','') }}" placeholder="مثلاً Bitcoin">
+  </div>
+
+  <button type="submit">اعمال</button>
+  <a class="btn ghost" href="{{ request.path }}">پاک کردن</a>
+</form>
+
+{% if breakdown %}
+<div class="panel">
+  <h2>تفکیک دلایل در این نما</h2>
+  <div class="body">
+    {% set biggest = breakdown[0].n %}
+    {% for r in breakdown %}
+      {% set info = reason(r.code) %}
+      <div class="bar-row">
+        <div class="label" title="{{ info[1] }}">{{ info[0] }}</div>
+        <div class="track"><div class="fill" style="width:{{ (r.n / biggest * 100)|round(1) }}%"></div></div>
+        <div class="n num">{{ '{:,}'.format(r.n) }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>نتیجه</th><th>دلیل</th><th>مرحله</th>
+        <th>گزینه</th><th>مجموع قیمت</th><th>لبه‌ی خالص</th><th>کارمزد</th><th>حجم ۲۴س</th>
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        {% set info = reason(r.code) %}
+        <tr>
+          <td class="wrap">
+            <a href="{{ url_for('market_detail', slug=r.event_slug) }}">{{ r.event_title or r.event_slug }}</a>
+            {% set susp = (r.suspicions or '[]')|fromjson %}
+            {% for s in susp %}
+              <span class="tag warn" title="{{ reason(s)[1] }}">{{ reason(s)[0] }}</span>
+            {% endfor %}
+          </td>
+          <td>
+            <span class="tag {{ {'opportunity':'good','near_miss':'info','rejected':'','error':'bad'}[r.outcome] }}">
+              {{ r.outcome|outcome_label }}
+            </span>
+          </td>
+          <td><span class="tag" title="{{ info[1] }}">{{ info[0] }}</span></td>
+          <td>{{ r.stage|stage_label }}</td>
+          <td class="num">{{ r.num_outcomes or '—' }}</td>
+          <td class="num">{{ r.sum_best_asks|fa_num(4) }}</td>
+          <td class="num {{ 'good' if r.net_edge and r.net_edge > 0 else '' }}">
+            {{ r.net_edge|pct(3) }}</td>
+          <td class="num">{{ r.fee_rate|pct(1) }}</td>
+          <td class="num">{{ r.volume_24h|money }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty">
+          <div class="big">چیزی با این فیلترها پیدا نشد.</div>
+          <div>فیلترها را پاک کنید یا اسکن دیگری را انتخاب کنید.</div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pager.html" %}
+
+{% endblock %}

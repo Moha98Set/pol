@@ -234,6 +234,14 @@ LIMIT_BUFFER_TICKS = _value("LIMIT_BUFFER_TICKS", 1, int)
 
 DB_PATH = os.getenv("DB_PATH", "")                    # "" = next to db.py
 RECORD = _env("RECORD", False, bool)
+
+# Per-event verdicts are what the dashboard reads to answer "which markets
+# did we skip, and why". A scan writes one row per event, so the table
+# grows by roughly MAX_EVENTS_SCAN rows every SCAN_INTERVAL and has to be
+# bounded. 96 scans is a day at the default interval. 0 disables pruning,
+# which is the right setting only if you are deliberately collecting a
+# long history and watching the file size.
+VERDICT_RETENTION_SCANS = _value("VERDICT_RETENTION_SCANS", 96, int)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()  # "text" | "json"
 LOG_FILE = os.getenv("LOG_FILE", "")

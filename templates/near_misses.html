@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}نزدیک‌ترین‌ها — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>نزدیک‌ترین‌ها به آربیتراژ</h1>
+<p class="sub">
+  بازارهایی که لبه داشتند ولی به آستانه‌ی اجرا نرسیدند. تا وقتی فرصت واقعی نادر است،
+  داستان روزانه اینجاست: چقدر نزدیک شدیم و روی کدام بازارها.
+</p>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="scope">بازه</label>
+    <select id="scope" name="scope" onchange="this.form.submit()">
+      <option value="today" {{ 'selected' if scope == 'today' }}>امروز</option>
+      <option value="all"   {{ 'selected' if scope == 'all' }}>همه‌ی تاریخچه</option>
+    </select>
+  </div>
+</form>
+
+<div class="panel">
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>نوع</th><th>گزینه</th>
+        <th>مجموع قیمت</th><th>لبه‌ی ناخالص</th><th>لبه‌ی خالص</th>
+        <th>کارمزد</th><th>حجم ۲۴س</th><th>زمان</th>
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        <tr>
+          <td class="wrap">
+            <a href="{{ url_for('market_detail', slug=r.event_slug) }}">{{ r.event_title or r.event_slug }}</a>
+            {% for s in (r.suspicions or '[]')|fromjson %}
+              <span class="tag warn" title="{{ reason(s)[1] }}">{{ reason(s)[0] }}</span>
+            {% endfor %}
+          </td>
+          <td>{{ 'دوگانه' if r.market_type == 'binary' else 'چندگانه' }}</td>
+          <td class="num">{{ r.num_outcomes }}</td>
+          <td class="num">{{ r.sum_best_asks|fa_num(4) }}</td>
+          <td class="num">{{ r.gross_edge|pct(3) }}</td>
+          <td class="num {{ 'good' if r.net_edge and r.net_edge > 0 else '' }}">{{ r.net_edge|pct(3) }}</td>
+          <td class="num">{{ r.fee_rate|pct(1) }}</td>
+          <td class="num">{{ r.volume_24h|money }}</td>
+          <td title="{{ r.found_at }}">{{ r.found_at|ago }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty">
+          <div class="big">هنوز نزدیک‌ترینی ثبت نشده است.</div>
+          <div>هر اسکن تا ۲۰ مورد برتر را ذخیره می‌کند.</div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pager.html" %}
+
+{% endblock %}

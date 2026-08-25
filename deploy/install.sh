@@ -31,6 +31,11 @@ EOF
 echo "==> Creating service user 'polly'"
 id -u polly &>/dev/null || useradd --system --no-create-home --shell /usr/sbin/nologin polly
 
+echo "==> Granting journal read access (for the dashboard System tab)"
+# Without this the dashboard renders an empty log pane: journalctl shows a
+# user only their own unit logs unless they are in systemd-journal.
+getent group systemd-journal >/dev/null && usermod -aG systemd-journal polly
+
 echo "==> Creating directories"
 mkdir -p "$APP_DIR" "$DATA_DIR" "$CONF_DIR"
 
@@ -53,7 +58,8 @@ echo "==> Building virtualenv"
 "$PY" -m venv "$APP_DIR/venv"
 "$APP_DIR/venv/bin/pip" install --quiet --upgrade pip
 "$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/deploy/requirements-server.txt"
-"$APP_DIR/venv/bin/python" -c "import requests, websockets; print('    deps OK')"
+"$APP_DIR/venv/bin/pip" install --quiet -r "$APP_DIR/deploy/requirements-dash.txt"
+"$APP_DIR/venv/bin/python" -c "import requests, websockets, flask, waitress; print('    deps OK')"
 
 echo "==> Installing config"
 if [[ ! -f "$CONF_DIR/polly.env" ]]; then
@@ -72,6 +78,7 @@ chmod 750 "$DATA_DIR"
 echo "==> Installing systemd units"
 install -m 644 "$APP_DIR/deploy/polly-monitor.service" /etc/systemd/system/
 install -m 644 "$APP_DIR/deploy/polly-live.service" /etc/systemd/system/
+install -m 644 "$APP_DIR/deploy/polly-dash.service" /etc/systemd/system/
 systemctl daemon-reload
 
 cat <<'EOF'
@@ -91,5 +98,11 @@ Then start the monitor:
 The live engine is optional and separate:
 
     sudo systemctl enable --now polly-live
+
+The dashboard needs a password before it will let anyone in:
+
+    sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --hash-password
+    sudo nano /etc/polly/polly.env      # paste the two lines it prints
+    sudo systemctl enable --now polly-dash
 
 EOF

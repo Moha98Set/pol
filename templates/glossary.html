@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}واژه‌نامه — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>واژه‌نامه</h1>
+<p class="sub">
+  هر دلیلی که سیستم می‌تواند برای کنار گذاشتن یک بازار بیاورد، و اینکه آن تصمیم از چه چیزی محافظت می‌کند.
+</p>
+
+<div class="panel">
+  <h2>چطور کار می‌کند</h2>
+  <div class="body" style="max-width:820px;line-height:1.95">
+    <p style="margin-top:0">
+      سیستم دنبال سبدهایی می‌گردد که گزینه‌هایشان <strong>متقابلاً منحصربه‌فرد</strong> باشند —
+      یعنی دقیقاً یکی از آن‌ها برنده می‌شود. اگر مجموع قیمت خرید همه‌ی گزینه‌ها از پرداختی
+      که تضمین می‌کنند کمتر باشد، اختلاف سود بدون ریسک است.
+    </p>
+    <p>
+      برای بازارهای دوگانه پرداخت تضمینی <span class="num">۱</span> دلار است.
+      برای بازارهای چندگانه اگر روی همه‌ی گزینه‌ها «نه» بخری،
+      <span class="num">N−۱</span> دلار پرداخت می‌شود — چون دقیقاً یکی برنده می‌شود و بقیه‌ی «نه»ها می‌گیرند.
+    </p>
+    <p style="margin-bottom:0">
+      بیشتر این فایل درباره‌ی دلایلی است که چرا یک سبدِ به‌ظاهر سودده در عمل سودده نیست:
+      کارمزد، اسلیپیج، نقدشوندگی، و راه‌هایی که داده می‌تواند دروغ بگوید.
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>مراحل بررسی</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>مرحله</th><th>یعنی چه</th></tr></thead>
+      <tbody>
+        {% for key, (label, text) in stages.items() %}
+        <tr><td><span class="tag info">{{ label }}</span></td><td class="wrap" style="max-width:none">{{ text }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>دلایل کنار گذاشتن</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>دلیل</th><th>کد فنی</th><th>توضیح</th></tr></thead>
+      <tbody>
+        {% for code, (label, text) in reasons.items() %}
+        <tr>
+          <td><span class="tag">{{ label }}</span></td>
+          <td class="num" style="color:var(--muted);font-size:12px">{{ code }}</td>
+          <td class="wrap" style="max-width:none">{{ text }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>پرچم‌های هشدار</h2>
+  <div class="body"><p class="sub" style="margin-top:0">
+    این‌ها بازار را رد نمی‌کنند، ولی نکته‌ای را علامت می‌زنند که در قضاوت باید لحاظ شود.
+  </p></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>پرچم</th><th>کد فنی</th><th>توضیح</th></tr></thead>
+      <tbody>
+        {% for code, (label, text) in suspicions.items() %}
+        <tr>
+          <td><span class="tag warn">{{ label }}</span></td>
+          <td class="num" style="color:var(--muted);font-size:12px">{{ code }}</td>
+          <td class="wrap" style="max-width:none">{{ text }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

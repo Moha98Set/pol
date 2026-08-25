@@ -1,0 +1,14 @@
+{% if pages > 1 %}
+{% set qs = request.args.to_dict() %}
+<div class="pager">
+  {% if page > 1 %}
+    {% set _ = qs.update({'page': page - 1}) %}
+    <a class="btn ghost" href="{{ request.path }}?{{ qs|urlencode }}">قبلی</a>
+  {% endif %}
+  <span>صفحه <span class="num">{{ page }}</span> از <span class="num">{{ pages }}</span></span>
+  {% if page < pages %}
+    {% set _ = qs.update({'page': page + 1}) %}
+    <a class="btn ghost" href="{{ request.path }}?{{ qs|urlencode }}">بعدی</a>
+  {% endif %}
+</div>
+{% endif %}

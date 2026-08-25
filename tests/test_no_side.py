@@ -428,3 +428,27 @@ def test_existing_yes_rows_still_default_to_a_payout_of_one(api, database):
     row = database.execute(
         "SELECT * FROM opportunities WHERE market_type = 'binary'").fetchone()
     assert row["payout_per_basket"] == 1.0
+
+
+def test_a_no_side_near_miss_records_its_gross_edge_against_the_right_payout():
+    """
+    A NO basket over N outcomes pays N-1, not 1.
+
+    _near_miss assumed a payout of 1 for every market type, so a
+    five-outcome basket costing 4.01 to return 4 was recorded with a gross
+    edge of 1 - 4.01 = -301% instead of 4 - 4.01 = -1%. net_edge was right
+    the whole time, which is why nothing downstream caught it.
+    """
+    miss = scanner._near_miss("multi_no", {"title": "t", "slug": "s"},
+                              num_outcomes=5, sum_asks=4.01, volume=1000,
+                              net_edge=-0.0025, fee_rate=0.04, payout=4)
+
+    assert miss["gross_edge"] == pytest.approx(-0.01)
+
+
+def test_a_yes_side_near_miss_still_uses_a_payout_of_one():
+    miss = scanner._near_miss("binary", {"title": "t", "slug": "s"},
+                              num_outcomes=2, sum_asks=1.02, volume=1000,
+                              net_edge=-0.03, fee_rate=0.04)
+
+    assert miss["gross_edge"] == pytest.approx(-0.02)

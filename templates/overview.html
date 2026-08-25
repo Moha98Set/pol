@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}خلاصه — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>خلاصه‌ی امروز</h1>
+<p class="sub">
+  {% if last %}
+    آخرین اسکن #{{ last.id }} — {{ last.started_at|ago }}
+    <span class="tag {{ 'good' if last.status == 'done' else 'warn' }}">{{ last.status }}</span>
+  {% else %}هنوز اسکنی انجام نشده است.{% endif %}
+</p>
+
+<div class="cards">
+  <div class="card"><div class="k">اسکن‌های امروز</div><div class="v num">{{ today.scans }}</div></div>
+  <div class="card"><div class="k">بازار خوانده‌شده</div><div class="v num">{{ today.events }}</div>
+       <div class="note">{{ today.analysed }} تا کامل تحلیل شد</div></div>
+  <div class="card"><div class="k">فرصت‌ها</div>
+       <div class="v num {{ 'good' if today.opportunities else '' }}">{{ today.opportunities }}</div>
+       <div class="note">{{ opportunities_total }} در کل تاریخچه</div></div>
+  <div class="card"><div class="k">نزدیک‌ترین‌ها</div><div class="v num">{{ today.near_misses }}</div></div>
+  <div class="card"><div class="k">خطاها</div>
+       <div class="v num {{ 'bad' if today.errors else '' }}">{{ today.errors }}</div></div>
+  <div class="card"><div class="k">سیگنال زنده</div><div class="v num">{{ signals_total }}</div></div>
+</div>
+
+{% if best %}
+<div class="panel">
+  <h2>نزدیک‌ترین بازار به آربیتراژ امروز</h2>
+  <div class="body">
+    <div style="font-size:16px;margin-bottom:10px">
+      <a href="{{ url_for('market_detail', slug=best.event_slug) }}">{{ best.event_title }}</a>
+    </div>
+    <dl class="dl">
+      <dt>مجموع بهترین قیمت‌ها</dt>
+      <dd><span class="num">{{ best.sum_best_asks|fa_num(4) }}</span> دلار برای پرداختی که
+          <span class="num">{{ 1 if best.market_type == 'binary' else (best.num_outcomes - 1) }}</span> دلار تضمین می‌کند</dd>
+      <dt>لبه‌ی خالص</dt>
+      <dd><span class="num {{ 'good' if best.net_edge > 0 else '' }}">{{ best.net_edge|pct(3) }}</span></dd>
+      <dt>کارمزد دسته</dt>
+      <dd><span class="num">{{ best.fee_rate|pct(1) }}</span></dd>
+      <dt>تعداد گزینه</dt>
+      <dd><span class="num">{{ best.num_outcomes }}</span></dd>
+    </dl>
+    <p class="sub" style="margin:14px 0 0">
+      {% if best.net_edge is not none and best.net_edge < 0 %}
+        این بازار سودآور نبود، ولی فاصله‌اش تا نقطه‌ی سربه‌سر
+        <span class="num">{{ (best.net_edge * -100)|fa_num(3) }}</span> درصد بود.
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endif %}
+
+{% if trend %}
+<div class="panel">
+  <h2>روند نزدیک‌ترین لبه در ۴۰ اسکن اخیر</h2>
+  <div class="body">
+    {% set vals = trend | map(attribute='best') | select('defined') | list %}
+    {% if vals | length > 1 %}
+      {% set lo = vals | min %}{% set hi = vals | max %}
+      {% set span = (hi - lo) if (hi - lo) > 0 else 0.0001 %}
+      <svg class="spark" viewBox="0 0 400 60" preserveAspectRatio="none" role="img"
+           aria-label="روند بهترین لبه">
+        <polyline fill="none" stroke="var(--accent)" stroke-width="2"
+          points="{% for r in trend %}{{ loop.index0 * (400 / (trend|length - 1)) }},{{ 54 - ((r.best - lo) / span * 48) }} {% endfor %}"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px">
+        <span>کمترین <span class="num">{{ lo|pct(3) }}</span></span>
+        <span>بیشترین <span class="num">{{ hi|pct(3) }}</span></span>
+      </div>
+      <p class="sub" style="margin-top:12px">
+        هرچه خط بالاتر برود، بازار به آربیتراژ نزدیک‌تر شده است. عبور از صفر یعنی فرصت واقعی.
+      </p>
+    {% else %}
+      <p class="sub" style="margin:0">برای رسم روند به داده‌ی بیشتری نیاز است.</p>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>چرا بازارها کنار گذاشته شدند — ۲۰ اسکن اخیر</h2>
+  <div class="body">
+    {% if top_reasons %}
+      {% set biggest = top_reasons[0].n %}
+      {% for r in top_reasons %}
+        {% set info = reason(r.code) %}
+        <div class="bar-row">
+          <div class="label" title="{{ info[1] }}">{{ info[0] }}</div>
+          <div class="track"><div class="fill" style="width:{{ (r.n / biggest * 100)|round(1) }}%"></div></div>
+          <div class="n num">{{ '{:,}'.format(r.n) }}</div>
+        </div>
+      {% endfor %}
+      <p class="sub" style="margin-top:16px">
+        نشانگر را روی هر دلیل نگه دارید تا توضیحش را ببینید، یا به
+        <a href="{{ url_for('glossary_page') }}">واژه‌نامه</a> بروید.
+      </p>
+    {% else %}
+      <p class="sub" style="margin:0">هنوز داده‌ای ثبت نشده است.</p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="panel">
+  <h2>اسکن‌های اخیر</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>#</th><th>زمان</th><th>وضعیت</th><th>واکشی</th><th>تحلیل</th>
+        <th>فرصت</th><th>نزدیک</th><th>خطا</th><th>مدت تحلیل</th>
+      </tr></thead>
+      <tbody>
+        {% for s in recent_scans %}
+        <tr>
+          <td class="num">{{ s.id }}</td>
+          <td title="{{ s.started_at }}">{{ s.started_at|ago }}</td>
+          <td><span class="tag {{ 'good' if s.status == 'done' else ('warn' if s.status == 'running' else 'bad') }}">{{ s.status }}</span></td>
+          <td class="num">{{ '{:,}'.format(s.events_total) }}</td>
+          <td class="num">{{ '{:,}'.format(s.events_scanned) }}</td>
+          <td class="num">{{ s.opportunities_found }}</td>
+          <td class="num">{{ s.near_misses_saved }}</td>
+          <td class="num">{{ s.errors }}</td>
+          <td class="num">{% if s.analysis_ms %}{{ (s.analysis_ms / 1000)|fa_num(1) }}s{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="9" class="empty">هنوز اسکنی ثبت نشده است.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

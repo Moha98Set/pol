@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}سیستم — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>سیستم</h1>
+<p class="sub">وضعیت سرویس‌ها و لاگ خام. این صفحه برای عیب‌یابی است، نه برای تحلیل بازار.</p>
+
+<div class="cards">
+  <div class="card"><div class="k">وضعیت</div>
+    <div class="v" style="font-size:19px">
+      <span class="tag {{ 'good' if status.get('ActiveState') == 'active' else 'bad' }}">
+        {{ status.get('ActiveState', '؟') }} / {{ status.get('SubState', '؟') }}</span></div></div>
+  <div class="card"><div class="k">راه‌اندازی مجدد</div>
+    <div class="v num {{ 'warn' if (status.get('NRestarts')|int) > 0 else '' }}">{{ status.get('NRestarts', '؟') }}</div>
+    <div class="note">تعداد دفعات از زمان فعال شدن</div></div>
+  <div class="card"><div class="k">حافظه</div>
+    <div class="v num">
+      {% set mem = status.get('MemoryCurrent', '') %}
+      {% if mem and mem.isdigit() %}{{ (mem|int / 1048576)|fa_num(0) }} MB{% else %}—{% endif %}</div></div>
+  <div class="card"><div class="k">اندازه‌ی دیتابیس</div>
+    <div class="v num">{% if db_size %}{{ (db_size / 1048576)|fa_num(1) }} MB{% else %}—{% endif %}</div>
+    <div class="note">شامل فایل‌های WAL</div></div>
+  <div class="card"><div class="k">ردیف‌های verdict</div>
+    <div class="v num">{% if verdict_rows is not none %}{{ '{:,}'.format(verdict_rows) }}{% else %}—{% endif %}</div>
+    <div class="note">در پنجره‌ی نگه‌داری</div></div>
+</div>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="unit">سرویس</label>
+    <select id="unit" name="unit" onchange="this.form.submit()">
+      {% for u in UNITS %}
+        <option value="{{ u }}" {{ 'selected' if unit == u }}>{{ u }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field">
+    <label for="lines">تعداد خط</label>
+    <select id="lines" name="lines" onchange="this.form.submit()">
+      {% for n in [50, 200, 500, 1000, 2000] %}
+        <option value="{{ n }}" {{ 'selected' if lines == n }}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <button type="submit">بارگذاری مجدد</button>
+</form>
+
+<div class="panel">
+  <h2>لاگ — {{ unit }}</h2>
+  <div class="body">
+    <pre class="logs" id="logs">{{ logs }}</pre>
+  </div>
+</div>
+
+<script>
+// Newest lines are at the bottom; jump there so the useful end is what
+// you land on rather than the start of a 2000-line buffer.
+var el = document.getElementById("logs");
+if (el) el.scrollTop = el.scrollHeight;
+</script>
+
+{% endblock %}

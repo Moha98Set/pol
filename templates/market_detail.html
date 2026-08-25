@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}{{ latest.event_title or slug }} — بازار{% endblock %}
+{% block body %}
+
+<h1>{{ latest.event_title or slug }}</h1>
+<p class="sub">
+  {{ latest.recorded_at|ago }} · اسکن #{{ latest.scan_id }}
+  {% if latest.url %}· <a href="{{ latest.url }}" target="_blank" rel="noopener">مشاهده در پالی‌مارکت</a>{% endif %}
+</p>
+
+<div class="cards">
+  <div class="card"><div class="k">آخرین نتیجه</div>
+    <div class="v" style="font-size:19px">
+      <span class="tag {{ {'opportunity':'good','near_miss':'info','rejected':'','error':'bad'}[latest.outcome] }}">
+        {{ latest.outcome|outcome_label }}</span></div>
+    <div class="note">{{ latest.code|reason_label }}</div></div>
+  <div class="card"><div class="k">مجموع بهترین قیمت‌ها</div>
+    <div class="v num">{{ latest.sum_best_asks|fa_num(4) }}</div></div>
+  <div class="card"><div class="k">لبه‌ی خالص</div>
+    <div class="v num {{ 'good' if latest.net_edge and latest.net_edge > 0 else '' }}">{{ latest.net_edge|pct(3) }}</div></div>
+  <div class="card"><div class="k">کارمزد</div><div class="v num">{{ latest.fee_rate|pct(1) }}</div>
+    <div class="note">{{ latest.fee_category or latest.category or '—' }}</div></div>
+  <div class="card"><div class="k">گزینه‌ها</div><div class="v num">{{ latest.num_outcomes or '—' }}</div></div>
+  <div class="card"><div class="k">حجم ۲۴ ساعته</div><div class="v num">{{ latest.volume_24h|money }}</div></div>
+</div>
+
+<div class="panel">
+  <h2>چرا این نتیجه</h2>
+  <div class="body">
+    {% set info = reason(latest.code) %}
+    <div style="font-size:16px;margin-bottom:8px">{{ info[0] }}</div>
+    <p style="margin:0;color:var(--muted);max-width:760px">{{ info[1] }}</p>
+    {% if latest.detail %}
+      <p style="margin:12px 0 0;font-size:14px">
+        <span style="color:var(--muted)">جزئیات این مورد:</span>
+        <span class="num">{{ latest.detail }}</span>
+      </p>
+    {% endif %}
+    <p style="margin:12px 0 0;font-size:14px;color:var(--muted)">
+      مرحله‌ی توقف: {{ latest.stage|stage_label }} — {{ stage_note(latest.stage) }}
+    </p>
+    {% if suspicions %}
+      <div style="margin-top:14px">
+        {% for s in suspicions %}
+          <span class="tag warn" title="{{ reason(s)[1] }}">{{ reason(s)[0] }}</span>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if trend|length > 1 %}
+<div class="panel">
+  <h2>روند مجموع قیمت‌ها در اسکن‌های اخیر</h2>
+  <div class="body">
+    {% set vals = trend | map(attribute='sum_best_asks') | list %}
+    {% set lo = vals | min %}{% set hi = vals | max %}
+    {% set span = (hi - lo) if (hi - lo) > 0 else 0.0001 %}
+    <svg class="spark" viewBox="0 0 400 60" preserveAspectRatio="none" role="img"
+         aria-label="روند مجموع قیمت‌ها">
+      <polyline fill="none" stroke="var(--accent)" stroke-width="2"
+        points="{% for r in trend %}{{ loop.index0 * (400 / (trend|length - 1)) }},{{ 54 - ((r.sum_best_asks - lo) / span * 48) }} {% endfor %}"/>
+    </svg>
+    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px">
+      <span>کمترین <span class="num">{{ lo|fa_num(4) }}</span></span>
+      <span>بیشترین <span class="num">{{ hi|fa_num(4) }}</span></span>
+    </div>
+    <p class="sub" style="margin-top:12px">
+      هرچه این خط پایین‌تر برود، سبد ارزان‌تر شده است. عبور از
+      <span class="num">{{ 1 if latest.market_type == 'binary' else ((latest.num_outcomes or 2) - 1) }}</span>
+      به سمت پایین یعنی ورود به ناحیه‌ی آربیتراژ.
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>تاریخچه‌ی این بازار</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>اسکن</th><th>زمان</th><th>نتیجه</th><th>دلیل</th>
+                 <th>مجموع قیمت</th><th>لبه‌ی خالص</th></tr></thead>
+      <tbody>
+        {% for r in history %}
+        <tr>
+          <td class="num">#{{ r.scan_id }}</td>
+          <td title="{{ r.recorded_at }}">{{ r.recorded_at|ago }}</td>
+          <td><span class="tag {{ {'opportunity':'good','near_miss':'info','rejected':'','error':'bad'}[r.outcome] }}">
+              {{ r.outcome|outcome_label }}</span></td>
+          <td><span class="tag" title="{{ reason(r.code)[1] }}">{{ r.code|reason_label }}</span></td>
+          <td class="num">{{ r.sum_best_asks|fa_num(4) }}</td>
+          <td class="num {{ 'good' if r.net_edge and r.net_edge > 0 else '' }}">{{ r.net_edge|pct(3) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="body" style="border-top:1px solid var(--border);color:var(--muted);font-size:13px">
+    تاریخچه به پنجره‌ی نگه‌داری محدود است؛ ردیف‌های قدیمی‌تر هرس می‌شوند.
+  </div>
+</div>
+
+{% if opps %}
+<div class="panel">
+  <h2>فرصت‌های ثبت‌شده روی این بازار</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>زمان</th><th>لبه‌ی خالص</th><th>سود</th><th>سرمایه</th><th></th></tr></thead>
+      <tbody>
+        {% for o in opps %}
+        <tr>
+          <td>{{ o.found_at|ago }}</td>
+          <td class="num good">{{ o.net_edge|pct(3) }}</td>
+          <td class="num">{{ o.best_profit|money(2) }}</td>
+          <td class="num">{{ o.best_capital|money }}</td>
+          <td><a href="{{ url_for('opportunity_detail', opp_id=o.id) }}">جزئیات</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<p><a class="btn ghost" href="{{ url_for('markets') }}">بازگشت به بازارها</a></p>
+
+{% endblock %}

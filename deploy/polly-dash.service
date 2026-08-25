@@ -1,0 +1,60 @@
+[Unit]
+Description=Polymarket arbitrage dashboard (read-only web UI)
+Documentation=file:/opt/polly/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polly
+Group=polly
+WorkingDirectory=/opt/polly
+
+# Carries DB_PATH plus POLLY_DASH_USER, POLLY_DASH_PASSWORD_HASH and
+# POLLY_DASH_SECRET_KEY. Without the last three the dashboard starts but
+# refuses every login, which is the correct failure: never open.
+EnvironmentFile=/etc/polly/polly.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# waitress rather than `python dashboard.py`: see requirements-dash.txt.
+# Four threads is ample for a handful of analysts and keeps one slow
+# SQLite scan from blocking the whole UI.
+ExecStart=/opt/polly/venv/bin/waitress-serve \
+    --host=${POLLY_DASH_HOST} \
+    --port=${POLLY_DASH_PORT} \
+    --threads=4 \
+    dashboard:app
+
+Restart=always
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=20
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polly-dash
+
+# --- Hardening ---------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# AF_UNIX as well as the IP families: the System tab shells out to
+# journalctl and systemctl, and both talk over unix sockets.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# The dashboard only ever issues SELECT, but SQLite in WAL mode writes to
+# the -shm and -wal sidecars even for readers, so the directory cannot be
+# mounted read-only.
+ReadWritePaths=/var/lib/polly
+
+[Install]
+WantedBy=multi-user.target

@@ -321,7 +321,14 @@ def compute_slippage_curve(legs_asks: list, sum_best_asks: float,
 
 def _near_miss(market_type: str, event: dict, num_outcomes: int,
                sum_asks: float, volume: float, net_edge: float,
-               fee_rate: float) -> dict:
+               fee_rate: float, payout: float = 1.0) -> dict:
+    """
+    `payout` is what one basket pays: 1 for a YES basket, N-1 for a NO
+    basket, where exactly one outcome wins and the other N-1 NOs pay out.
+    It was previously hardcoded to 1, which made every multi_no row record
+    a gross edge of roughly -(N-2) — a five-outcome basket costing 4.01 to
+    return 4 was stored as -301% rather than -1%.
+    """
     return {
         "kind": "near_miss",
         "market_type": market_type,
@@ -329,7 +336,7 @@ def _near_miss(market_type: str, event: dict, num_outcomes: int,
         "event_slug": event.get("slug"),
         "num_outcomes": num_outcomes,
         "sum_best_asks": sum_asks,
-        "gross_edge": 1 - sum_asks,
+        "gross_edge": payout - sum_asks,
         "net_edge": net_edge,
         "fee_rate": fee_rate,
         "volume_24h": volume,
@@ -632,14 +639,15 @@ def scan_multi_no_side(group: dict, books: dict = None) -> tuple:
     if edge_per_dollar is None or edge_per_dollar < MIN_NET_EDGE:
         if edge_per_dollar is not None and edge_per_dollar >= NEAR_MISS_MIN_NET:
             miss = _near_miss("multi_no", event, n, sum_no,
-                              group["volume"], edge_per_dollar, fee_rate)
+                              group["volume"], edge_per_dollar, fee_rate,
+                              payout=payout)
             return miss, validate.reject(BELOW_MIN_EDGE,
                                          f"{edge_per_dollar*100:.3f}%/$")
         return None, validate.reject(FAR_BELOW_EDGE)
 
     if not result["curve"]:
         return (_near_miss("multi_no", event, n, sum_no, group["volume"],
-                           edge_per_dollar, fee_rate),
+                           edge_per_dollar, fee_rate, payout=payout),
                 validate.reject(NO_FILLABLE_SIZE))
 
     best = max(result["curve"], key=lambda x: x["profit"])

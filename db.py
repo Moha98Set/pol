@@ -191,6 +191,56 @@ CREATE TABLE IF NOT EXISTS execution_legs (
     FOREIGN KEY (execution_id) REFERENCES executions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_exec_legs ON execution_legs(execution_id);
+
+-- One row per event per scan: the verdict that event received and the
+-- numbers behind it.
+--
+-- The rejections table already counts *how many* events each reason
+-- rejected, which is all the funnel needs. It cannot answer "which
+-- markets did we skip, and why" because identity is discarded the moment
+-- the counter increments. That question is the whole point of a dashboard
+-- someone reads to form a judgement, so the identity is kept here.
+--
+-- Exactly one row per event per scan — written where the event came to
+-- rest, not at every stage it passed through — so a scan's rows are a
+-- partition of what it fetched and can be counted on without dedupe.
+--
+-- ~2100 rows per scan at 96 scans a day is 200k rows daily, so this table
+-- is pruned to the most recent VERDICT_RETENTION_SCANS scans. It is a
+-- window on recent behaviour, never the permanent record; opportunities,
+-- near_misses and rejections remain that.
+CREATE TABLE IF NOT EXISTS event_verdicts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_id INTEGER NOT NULL,
+    recorded_at TEXT NOT NULL,
+
+    event_slug TEXT,
+    event_title TEXT,
+    category TEXT,
+    market_type TEXT,                   -- 'binary' | 'multi' | NULL pre-filter
+    num_outcomes INTEGER,
+    volume_24h REAL,
+
+    stage TEXT NOT NULL,                -- prefilter|book|edge|analysis|error
+    code TEXT NOT NULL,                 -- a validate.py code, 'ok' if kept
+    outcome TEXT NOT NULL,              -- rejected|near_miss|opportunity|error
+    detail TEXT,                        -- the verdict's own explanation
+    suspicions TEXT,                    -- JSON array: flagged, not rejected
+
+    sum_best_asks REAL,
+    gross_edge REAL,
+    net_edge REAL,
+    fee_rate REAL,
+    fee_category TEXT,
+    url TEXT,
+
+    FOREIGN KEY (scan_id) REFERENCES scans(id)
+);
+CREATE INDEX IF NOT EXISTS idx_verdict_scan ON event_verdicts(scan_id);
+CREATE INDEX IF NOT EXISTS idx_verdict_code ON event_verdicts(code);
+CREATE INDEX IF NOT EXISTS idx_verdict_outcome ON event_verdicts(outcome);
+CREATE INDEX IF NOT EXISTS idx_verdict_slug ON event_verdicts(event_slug);
+CREATE INDEX IF NOT EXISTS idx_verdict_edge ON event_verdicts(net_edge);
 """
 
 
@@ -336,6 +386,62 @@ def save_near_misses(db: sqlite3.Connection, scan_id: int, misses: list):
             nm.get("url"),
         ))
     db.commit()
+
+
+def save_event_verdicts(db: sqlite3.Connection, scan_id: int, rows: list):
+    """
+    Write this scan's per-event verdicts.
+
+    One executemany rather than a loop of execute: a scan produces a couple
+    of thousand of these, and at that size the per-statement overhead is
+    the difference between a rounding error and a visible pause at the end
+    of every cycle.
+    """
+    if not rows:
+        return
+
+    now = utcnow()
+    db.executemany("""
+        INSERT INTO event_verdicts (
+            scan_id, recorded_at, event_slug, event_title, category,
+            market_type, num_outcomes, volume_24h, stage, code, outcome,
+            detail, suspicions, sum_best_asks, gross_edge, net_edge,
+            fee_rate, fee_category, url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, [(
+        scan_id, now, r.get("event_slug"), r.get("event_title"),
+        r.get("category"), r.get("market_type"), r.get("num_outcomes"),
+        r.get("volume_24h"), r["stage"], r["code"], r["outcome"],
+        r.get("detail"), json.dumps(r.get("suspicions") or []),
+        r.get("sum_best_asks"), r.get("gross_edge"), r.get("net_edge"),
+        r.get("fee_rate"), r.get("fee_category"), r.get("url"),
+    ) for r in rows])
+    db.commit()
+
+
+def prune_event_verdicts(db: sqlite3.Connection, keep_scans: int) -> int:
+    """
+    Drop verdict rows older than the most recent `keep_scans` scans.
+
+    Bounded by scan count rather than by age because that stays correct
+    when SCAN_INTERVAL changes: the window is always "the last N scans I
+    actually ran", not a wall-clock guess about how many that should have
+    been. keep_scans <= 0 disables pruning.
+    """
+    if keep_scans <= 0:
+        return 0
+
+    row = db.execute("""
+        SELECT scan_id FROM event_verdicts
+        GROUP BY scan_id ORDER BY scan_id DESC LIMIT 1 OFFSET ?
+    """, (keep_scans - 1,)).fetchone()
+    if row is None:
+        return 0
+
+    cur = db.execute("DELETE FROM event_verdicts WHERE scan_id < ?",
+                     (row["scan_id"],))
+    db.commit()
+    return cur.rowcount
 
 
 # ====================================================================

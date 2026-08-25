@@ -397,6 +397,93 @@ def test_a_full_scan_records_the_funnel(api, database):
     assert funnel["prefilter"][validate.NOT_NEG_RISK] == 1
 
 
+def test_every_fetched_event_gets_exactly_one_verdict_row(api, database):
+    """
+    The verdict table is a partition of what the scan fetched.
+
+    Nothing may be counted twice by passing a stage and being logged again
+    later, and nothing may vanish — a market absent from this table is a
+    market the dashboard silently cannot explain.
+    """
+    api.add(fakeapi.binary_event(slug="arb", yes=(0.40, 100), no=(0.55, 100)))
+    api.add(fakeapi.binary_event(slug="poor", volume=5))
+    api.add(fakeapi.multi_event(slug="notneg", neg_risk=False))
+
+    arb_monitor.run_scan(database)
+
+    scan = database.execute("SELECT * FROM scans").fetchone()
+    rows = database.execute("SELECT * FROM event_verdicts").fetchall()
+
+    assert len(rows) == scan["events_total"] == 3
+    assert len({r["event_slug"] for r in rows}) == 3
+
+
+def test_a_verdict_row_carries_the_reason_the_funnel_only_counts(api, database):
+    api.add(fakeapi.binary_event(slug="poor", volume=5))
+    api.add(fakeapi.multi_event(slug="notneg", neg_risk=False))
+
+    arb_monitor.run_scan(database)
+
+    by_slug = {r["event_slug"]: r for r in
+               database.execute("SELECT * FROM event_verdicts")}
+
+    assert by_slug["poor"]["code"] == validate.LOW_VOLUME
+    assert by_slug["poor"]["outcome"] == "rejected"
+    assert by_slug["poor"]["stage"] == "prefilter"
+    assert by_slug["notneg"]["code"] == validate.NOT_NEG_RISK
+
+
+def test_a_rejecting_verdict_keeps_its_code(api, database):
+    """
+    Verdict.__bool__ returns .ok, so `if verdict` is False for exactly the
+    verdicts worth recording. Written as a test because the truthy form
+    reads correctly and silently stored 'unknown' for every rejection.
+    """
+    api.add(fakeapi.binary_event(slug="poor", volume=5))
+
+    arb_monitor.run_scan(database)
+
+    row = database.execute("SELECT * FROM event_verdicts").fetchone()
+    assert row["code"] != "unknown"
+    assert row["code"] == validate.LOW_VOLUME
+
+
+def test_an_opportunity_verdict_carries_its_numbers(api, database):
+    api.add(fakeapi.binary_event(slug="arb", yes=(0.40, 100), no=(0.55, 100)))
+
+    arb_monitor.run_scan(database)
+
+    row = database.execute("SELECT * FROM event_verdicts").fetchone()
+    assert row["outcome"] == "opportunity"
+    assert row["sum_best_asks"] == pytest.approx(0.95)
+    assert row["net_edge"] is not None
+    assert row["market_type"] == "binary"
+    assert row["url"].endswith("/arb")
+
+
+def test_verdicts_are_pruned_to_the_retention_window(api, database):
+    api.add(fakeapi.binary_event(slug="e1"))
+
+    for _ in range(4):
+        arb_monitor.run_scan(database)
+
+    dblib.prune_event_verdicts(database, keep_scans=2)
+
+    remaining = {r["scan_id"] for r in
+                 database.execute("SELECT scan_id FROM event_verdicts")}
+    assert remaining == {3, 4}
+
+
+def test_pruning_is_disabled_by_a_non_positive_window(api, database):
+    api.add(fakeapi.binary_event(slug="e1"))
+    for _ in range(3):
+        arb_monitor.run_scan(database)
+
+    assert dblib.prune_event_verdicts(database, keep_scans=0) == 0
+    assert database.execute(
+        "SELECT COUNT(*) c FROM event_verdicts").fetchone()["c"] == 3
+
+
 def test_a_scan_marks_itself_finished(api, database):
     api.add(fakeapi.binary_event())
     arb_monitor.run_scan(database)

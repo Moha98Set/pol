@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>پیکربندی ناقص</title>
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1117;
+     color:#e6edf3;font-family:"Segoe UI",Tahoma,Vazirmatn,system-ui,sans-serif;padding:24px}
+.box{max-width:600px;background:#161b22;border:1px solid #2a313c;border-radius:14px;padding:32px;line-height:1.95}
+h1{font-size:20px;margin:0 0 14px}
+code{background:#0e1117;border:1px solid #2a313c;border-radius:6px;padding:2px 7px;
+     font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;direction:ltr;display:inline-block}
+pre{background:#0e1117;border:1px solid #2a313c;border-radius:9px;padding:14px;overflow-x:auto;
+    direction:ltr;text-align:left;font-size:13px;font-family:"SF Mono",Menlo,Consolas,monospace}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>داشبورد هنوز پیکربندی نشده است</h1>
+  <p>
+    ورود غیرفعال است چون <code>POLLY_DASH_USER</code> یا
+    <code>POLLY_DASH_PASSWORD_HASH</code> تنظیم نشده‌اند.
+  </p>
+  <p>روی سرور این را اجرا کنید تا هش رمز ساخته شود:</p>
+  <pre>sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --hash-password</pre>
+  <p>
+    خروجی را همراه با نام کاربری در <code>/etc/polly/polly.env</code> بگذارید و سپس
+    <code>systemctl restart polly-dash</code> بزنید.
+  </p>
+</div>
+</body>
+</html>

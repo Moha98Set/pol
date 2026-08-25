@@ -27,6 +27,14 @@ and must not be copied to the server.)
 | `/var/lib/polly` | `arb_monitor.db` | yes |
 | `/etc/polly/polly.env` | settings | no |
 
+Three units, each independent:
+
+| Unit | Does | Needed? |
+|---|---|---|
+| `polly-monitor` | the 15-minute scan; fills the database | yes |
+| `polly-live` | WebSocket book tracking, sub-second edges | optional |
+| `polly-dash` | the web dashboard | optional |
+
 Code read-only is deliberate. The application never writes beside itself —
 every path in the pipeline is built from `Path(__file__).parent` or from
 `DB_PATH`, so it does not care what the working directory is, and the only
@@ -155,6 +163,54 @@ writer is running produces a file that may not open:
 sudo -u polly sqlite3 /var/lib/polly/arb_monitor.db \
     ".backup '/var/backups/polly-$(date +%F).db'"
 ```
+
+## The dashboard
+
+A read-only web UI for analysts: what the scan saw today, which markets it
+skipped and why, and how close the closest basket came. It reads the same
+SQLite file the monitor writes and only ever issues SELECT.
+
+Set a password first — until one exists it starts but refuses every login:
+
+```bash
+sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --hash-password
+```
+
+It prints a `POLLY_DASH_PASSWORD_HASH` and a `POLLY_DASH_SECRET_KEY`. Put
+both in `/etc/polly/polly.env` next to `POLLY_DASH_USER`, then:
+
+```bash
+sudo systemctl enable --now polly-dash
+```
+
+It listens on `POLLY_DASH_PORT` (8971 by default). Only the scrypt hash is
+stored; the password itself never touches disk.
+
+**This is plain HTTP.** The login password crosses the network in the
+clear, so anyone able to watch the traffic can read it. What is in place
+regardless: the password is hashed at rest, sessions are `HttpOnly` +
+`SameSite=Lax`, and eight failed logins from one IP lock it out for five
+minutes. To close the remaining gap, either put a TLS terminator in front
+of it, or set `POLLY_DASH_HOST=127.0.0.1` and reach it through a tunnel:
+
+```bash
+ssh -L 8971:127.0.0.1:8971 root@<server>
+```
+
+### Where the market-by-market data comes from
+
+The `rejections` table only ever counted reasons, never which markets they
+belonged to, so "why did we skip this one" was unanswerable. `event_verdicts`
+records one row per event per scan and is what the Markets and Rejected
+tabs read.
+
+It is a window, not an archive: roughly `MAX_EVENTS_SCAN` rows land every
+`SCAN_INTERVAL`, so it is pruned to the most recent `VERDICT_RETENTION_SCANS`
+scans (96, a day at the default interval). `opportunities`, `near_misses`
+and `rejections` remain the permanent record.
+
+The tables stay empty until the first scan **after** the upgrade finishes,
+which is why the tabs explain themselves rather than showing zero rows.
 
 ## Going live (not configured here)
 

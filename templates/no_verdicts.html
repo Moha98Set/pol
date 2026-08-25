@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}هنوز داده‌ای نیست — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>هنوز داده‌ی بازار به بازار ثبت نشده</h1>
+
+<div class="panel"><div class="empty">
+  <div class="big">جدول <span class="num">event_verdicts</span> خالی است یا هنوز ساخته نشده.</div>
+  <div style="max-width:620px;margin:12px auto 0;line-height:1.95;text-align:right">
+    این جدول از نسخه‌ای به بعد اضافه شده و در پایان <strong>اولین اسکن پس از بروزرسانی</strong> پر می‌شود.
+    اگر همین حالا کد را روی سرور بروز کرده‌اید، تا پایان اسکن بعدی صبر کنید — با تنظیمات پیش‌فرض
+    حداکثر پانزده دقیقه طول می‌کشد.
+    <br><br>
+    تا آن زمان <a href="{{ url_for('near_misses') }}">نزدیک‌ترین‌ها</a> و
+    <a href="{{ url_for('funnel') }}">قیف</a> کار می‌کنند، چون از جدول‌های قدیمی‌تر می‌خوانند.
+  </div>
+</div></div>
+
+{% endblock %}
