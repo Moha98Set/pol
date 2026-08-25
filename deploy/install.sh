@@ -66,7 +66,34 @@ if [[ ! -f "$CONF_DIR/polly.env" ]]; then
     install -m 640 "$APP_DIR/deploy/polly.env.example" "$CONF_DIR/polly.env"
     echo "    wrote $CONF_DIR/polly.env (review it before starting)"
 else
-    echo "    $CONF_DIR/polly.env exists, left untouched"
+    echo "    $CONF_DIR/polly.env exists, keeping your values"
+    # An env file written before a feature existed is missing that
+    # feature's keys, and the unit that reads them fails at start rather
+    # than falling back. Append only what is absent; never touch a key
+    # that already has a value.
+    added=()
+    for key in VERDICT_RETENTION_SCANS POLLY_DASH_HOST POLLY_DASH_PORT \
+               POLLY_DASH_USER POLLY_DASH_PASSWORD_HASH POLLY_DASH_SECRET_KEY; do
+        if ! grep -qE "^${key}=" "$CONF_DIR/polly.env"; then
+            added+=("$key")
+        fi
+    done
+    if (( ${#added[@]} )); then
+        {
+            echo ""
+            echo "# --- added by install.sh on $(date +%F) ---"
+            for key in "${added[@]}"; do
+                case "$key" in
+                    VERDICT_RETENTION_SCANS) echo "VERDICT_RETENTION_SCANS=96" ;;
+                    POLLY_DASH_HOST)         echo "POLLY_DASH_HOST=0.0.0.0" ;;
+                    POLLY_DASH_PORT)         echo "POLLY_DASH_PORT=8971" ;;
+                    POLLY_DASH_USER)         echo "POLLY_DASH_USER=analyst" ;;
+                    *)                       echo "${key}=" ;;
+                esac
+            done
+        } >> "$CONF_DIR/polly.env"
+        echo "    added ${#added[@]} new setting(s): ${added[*]}"
+    fi
 fi
 chown root:polly "$CONF_DIR/polly.env"
 

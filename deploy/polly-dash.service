@@ -10,11 +10,19 @@ User=polly
 Group=polly
 WorkingDirectory=/opt/polly
 
+Environment=PYTHONDONTWRITEBYTECODE=1
+
+# Defaults BEFORE EnvironmentFile, so the file overrides them when it sets
+# these and they still hold when it does not. Without this an env file
+# written before the dashboard existed expands to `--host= --port=` and
+# the unit dies on every start.
+Environment=POLLY_DASH_HOST=0.0.0.0
+Environment=POLLY_DASH_PORT=8971
+
 # Carries DB_PATH plus POLLY_DASH_USER, POLLY_DASH_PASSWORD_HASH and
 # POLLY_DASH_SECRET_KEY. Without the last three the dashboard starts but
 # refuses every login, which is the correct failure: never open.
 EnvironmentFile=/etc/polly/polly.env
-Environment=PYTHONDONTWRITEBYTECODE=1
 
 # waitress rather than `python dashboard.py`: see requirements-dash.txt.
 # Four threads is ample for a handful of analysts and keeps one slow
