@@ -45,6 +45,17 @@
   {% endif %}
 
   <div class="field">
+    <label for="suspicion">پرچم هشدار</label>
+    <select id="suspicion" name="suspicion">
+      <option value="">همه</option>
+      <option value="any" {{ 'selected' if request.args.get('suspicion') == 'any' }}>هر پرچمی دارد</option>
+      {% for code, (label, _text) in (suspicions or {}).items() %}
+        <option value="{{ code }}" {{ 'selected' if request.args.get('suspicion') == code }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field">
     <label for="q">جستجو در عنوان</label>
     <input id="q" name="q" type="text" value="{{ request.args.get('q','') }}" placeholder="مثلاً Bitcoin">
   </div>

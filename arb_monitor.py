@@ -27,6 +27,7 @@ import config
 import db as dblib
 import logging_setup
 import metrics
+import notify
 import recorder
 import scanner
 from logging_setup import fields, timed
@@ -207,6 +208,10 @@ def run_scan(db) -> tuple:
             dblib.save_opportunity(db, scan_id, result)
             opportunities_found += 1
             funnel.opportunities += 1
+            # After the write, never before: a stored opportunity that
+            # nobody was told about is recoverable, an alert about one that
+            # was never stored is not.
+            notify.opportunity(result)
             log.info("opportunity found", extra=fields(
                 scan_id=scan_id, stage="opportunity", event_slug=slug,
                 market_type=result["market_type"],

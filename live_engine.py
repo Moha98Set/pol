@@ -48,6 +48,7 @@ from websockets.exceptions import ConnectionClosed
 import arbmath
 import config
 import db as dblib
+import notify
 import scanner
 
 WS_URL = config.WS_URL
@@ -208,6 +209,13 @@ class WatchedEvent:
         self.signal: Optional[dict] = None
         self.last_eval = 0.0
 
+        # Open recording window, if the edge is currently inside the watch
+        # band. Independent of `signal`: the band is much wider than the
+        # signal threshold, so a window routinely exists with no signal —
+        # which is the whole point of recording it.
+        self.window: Optional[dict] = None
+        self.last_tick_ms = 0.0
+
     @property
     def token_ids(self) -> List[str]:
         return [t for _n, t in self.legs]
@@ -273,7 +281,19 @@ class LiveEngine:
         self.db = dblib.connect() if store else None
 
         self._resubscribe = asyncio.Event()
-        self.stats = {"updates": 0, "evals": 0, "signals": 0}
+        self.stats = {"updates": 0, "evals": 0, "signals": 0,
+                      "windows": 0, "ticks": 0}
+
+        self.record = config.LIVE_RECORD and store
+        # Ticks are buffered and flushed in batches: a commit per book
+        # update would put fsync inside the WebSocket read loop.
+        self._tick_buffer: List[dict] = []
+
+        if self.record and self.db is not None:
+            orphans = dblib.close_orphan_windows(self.db)
+            if orphans:
+                log.info("Closed %d window(s) left open by a previous run",
+                         orphans)
 
     # -----------------------------------------------------------------
     # Watchlist
@@ -453,12 +473,168 @@ class LiveEngine:
         side, result, edge = max(
             candidates, key=lambda c: c[2] if c[2] is not None else -9e9)
 
+        # Record before the threshold test, not after. Everything below
+        # min_edge used to be discarded here, and that discarded set is
+        # exactly what a ten-minute window looks like.
+        self._record_edge(watched, side, result, edge)
+
         if edge is None or edge < self.min_edge or not result["best"]:
             self._close_signal(watched, reason="edge_gone")
             return
 
         result = dict(result, side=side, comparable_edge=edge)
         self._open_or_update_signal(watched, result)
+
+    # -----------------------------------------------------------------
+    # Edge recording
+    # -----------------------------------------------------------------
+
+    def _record_edge(self, watched: WatchedEvent, side: str, result: dict,
+                     edge: Optional[float]):
+        """
+        Track the edge's shape while it sits inside the watch band.
+
+        A window opens when the edge first enters the band and closes when
+        it leaves — so a market that dips for ten minutes and recovers
+        becomes one row with a duration, a depth and a time of day, which
+        is what makes it comparable to the next one.
+        """
+        if not self.record or self.db is None:
+            return
+
+        in_band = edge is not None and edge >= config.LIVE_RECORD_MIN_EDGE
+        now = time.time()
+        now_ms = now * 1000
+
+        if not in_band:
+            self._close_window(watched, now, edge)
+            return
+
+        sum_asks = result.get("sum_best_asks")
+        crossed = edge >= self.min_edge
+
+        # Depth, not just price. A ten-minute window that was never
+        # fillable past five dollars charts identically to one worth
+        # taking, and "you cannot fill it" is already the most common
+        # reason a visible edge turns out not to be real.
+        best = result.get("best") or {}
+        # real_cost, not capital: `capital` is the ladder rung that was
+        # requested, and it comes back unchanged whether the book could
+        # absorb it or not. `real_cost` is what the book actually took —
+        # $2.97 on a three-share leg against the same $100 request. Storing
+        # `capital` would have made every window look equally deep, which
+        # is the exact confusion this column exists to remove.
+        cap = best.get("real_cost")
+        prof = best.get("profit")
+
+        if watched.window is None:
+            stamp = utcnow()
+            window_id = dblib.open_edge_window(self.db, {
+                "event_slug": watched.slug,
+                "event_title": watched.title,
+                "side": side,
+                "num_outcomes": len(watched.legs),
+                "fee_rate": watched.fee_rate,
+                "payout": 1.0 if side == "yes" else max(len(watched.legs) - 1, 1),
+                "opened_at": stamp,
+                "edge": edge,
+                "sum_best_asks": sum_asks,
+                "fillable_capital": cap,
+                "fillable_profit": prof,
+                "crossed": crossed,
+                "url": watched.url,
+            })
+            watched.window = {
+                "id": window_id, "opened": now, "ticks": 0,
+                "best_edge": edge, "best_sum_asks": sum_asks,
+                "best_capital": cap, "best_profit": prof,
+                "best_at": stamp, "crossed": crossed, "dirty": False,
+            }
+            watched.last_tick_ms = 0.0
+            self.stats["windows"] += 1
+
+        win = watched.window
+        if edge > win["best_edge"]:
+            win.update(best_edge=edge, best_sum_asks=sum_asks,
+                       best_capital=cap, best_profit=prof,
+                       best_at=utcnow(), dirty=True)
+        if crossed and not win["crossed"]:
+            win["crossed"] = True
+            win["dirty"] = True
+            # Sent while the window is still open. Waiting for it to close
+            # would mean every alert describes something already gone.
+            notify.window_crossed({
+                "event_slug": watched.slug, "event_title": watched.title,
+                "edge": edge, "sum_best_asks": sum_asks, "side": side,
+                "url": watched.url,
+            })
+
+        # Rate limit: several evaluations a second carry no more shape than
+        # one, and the row count is the only thing that grows.
+        if now_ms - watched.last_tick_ms < config.LIVE_TICK_MIN_INTERVAL_MS:
+            return
+        watched.last_tick_ms = now_ms
+
+        win["ticks"] += 1
+        win["dirty"] = True
+        self.stats["ticks"] += 1
+        self._tick_buffer.append({
+            "window_id": win["id"],
+            "ts_ms": int(now_ms),
+            "recorded_at": utcnow(),
+            "sum_best_asks": sum_asks,
+            "net_edge": result.get("net_edge"),
+            "comparable_edge": edge,
+            "fillable_capital": cap,
+            "fillable_profit": prof,
+        })
+
+        if len(self._tick_buffer) >= 50:
+            self._flush_ticks()
+
+    def _close_window(self, watched: WatchedEvent, now: float,
+                      edge: Optional[float]):
+        win = watched.window
+        if win is None:
+            return
+        watched.window = None
+
+        duration_ms = int((now - win["opened"]) * 1000)
+        self._flush_ticks()
+
+        # A lone evaluation that grazed the band is noise. Drop the row
+        # rather than leaving a zero-length episode to skew every average
+        # of "how long do these last".
+        if duration_ms < config.MIN_WINDOW_MS and not win["crossed"]:
+            self.db.execute("DELETE FROM edge_ticks WHERE window_id = ?",
+                            (win["id"],))
+            self.db.execute("DELETE FROM edge_windows WHERE id = ?",
+                            (win["id"],))
+            self.db.commit()
+            self.stats["windows"] -= 1
+            return
+
+        dblib.update_edge_window(self.db, win["id"], {
+            "ticks": win["ticks"], "best_edge": win["best_edge"],
+            "best_sum_asks": win["best_sum_asks"], "best_at": win["best_at"],
+            "best_capital": win.get("best_capital"),
+            "best_profit": win.get("best_profit"),
+            "crossed": win["crossed"],
+        })
+        dblib.close_edge_window(
+            self.db, win["id"], closed_at=utcnow(),
+            duration_ms=duration_ms, closed_edge=edge, ticks=win["ticks"])
+
+        log.info("window closed | %s | %.1f min | best edge %.3f%% | %s",
+                 (watched.title or watched.slug)[:44], duration_ms / 60000,
+                 (win["best_edge"] or 0) * 100,
+                 "SIGNAL" if win["crossed"] else "near only")
+
+    def _flush_ticks(self):
+        if not self._tick_buffer:
+            return
+        dblib.save_edge_ticks(self.db, self._tick_buffer)
+        self._tick_buffer = []
 
     def _open_or_update_signal(self, watched: WatchedEvent, result: dict):
         now = time.time()
@@ -638,15 +814,42 @@ class LiveEngine:
         while True:
             await asyncio.sleep(60)
             open_edges = sum(1 for e in self.events.values() if e.signal)
-            log.info("stats | %d updates | %d evals | %d signals | %d open",
+            open_windows = sum(1 for e in self.events.values() if e.window)
+            # A window can stay inside the band for a long time without
+            # producing a tick batch big enough to flush, so the buffer is
+            # drained on this timer too — otherwise a slow episode is
+            # invisible until it ends.
+            if self.record:
+                self._flush_ticks()
+            log.info("stats | %d updates | %d evals | %d signals | %d open"
+                     " | %d windows (%d live) | %d ticks",
                      self.stats["updates"], self.stats["evals"],
-                     self.stats["signals"], open_edges)
+                     self.stats["signals"], open_edges,
+                     self.stats["windows"], open_windows,
+                     self.stats["ticks"])
+
+    async def _pruner(self):
+        """Age out tick rows. Windows are kept — they are the record."""
+        while True:
+            await asyncio.sleep(6 * 3600)
+            if not self.record:
+                continue
+            try:
+                dropped = await asyncio.to_thread(
+                    dblib.prune_edge_ticks, self.db,
+                    config.TICK_RETENTION_DAYS)
+                if dropped:
+                    log.info("Pruned %d tick(s) older than %d days",
+                             dropped, config.TICK_RETENTION_DAYS)
+            except Exception as e:
+                log.error("Tick pruning failed: %s", e)
 
     async def run(self):
         await asyncio.to_thread(self.build_watchlist)
 
         refresher = asyncio.create_task(self._refresher())
         reporter = asyncio.create_task(self._reporter())
+        pruner = asyncio.create_task(self._pruner())
 
         try:
             while True:
@@ -662,12 +865,22 @@ class LiveEngine:
                 finally:
                     # every reconnect starts from a fresh snapshot, so any
                     # open signal was measured on a book we no longer trust
+                    now = time.time()
                     for watched in self.events.values():
                         self._close_signal(watched, reason="disconnect")
+                        # Close the window too: the gap in coverage is real,
+                        # and an episode spanning it would report a duration
+                        # that includes time nobody was watching.
+                        self._close_window(watched, now, None)
                     self._resubscribe.clear()
         finally:
             refresher.cancel()
             reporter.cancel()
+            pruner.cancel()
+            if self.record:
+                for watched in self.events.values():
+                    self._close_window(watched, time.time(), None)
+                self._flush_ticks()
 
 
 # =====================================================================

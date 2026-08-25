@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}هنوز پنجره‌ای نیست — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+<h1>هنوز پنجره‌ای ثبت نشده</h1>
+<div class="panel"><div class="empty">
+  <div class="big">جدول <span class="num">edge_windows</span> هنوز ساخته نشده.</div>
+  <div style="max-width:620px;margin:12px auto 0;line-height:1.95;text-align:right">
+    این جدول را موتور زنده (<span class="num">polly-live</span>) پر می‌کند. اگر تازه کد را
+    بروز کرده‌اید، سرویس باید یک بار ری‌استارت شود تا جدول ساخته شود:
+    <br><br>
+    <span class="num">sudo systemctl restart polly-live</span>
+    <br><br>
+    بعد از آن، پنجره‌ها وقتی ثبت می‌شوند که قیمت یک سبد وارد محدوده‌ی تماشا شود.
+    در بازار آرام ممکن است ساعت‌ها طول بکشد — نبودِ پنجره خودش یک یافته است، نه خطا.
+  </div>
+</div></div>
+{% endblock %}

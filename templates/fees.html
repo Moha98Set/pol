@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}کارمزدها — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>کارمزد بر اساس دسته</h1>
+<p class="sub">
+  کارمزد پالی‌مارکت بین ۰٪ تا ۷٪ فرق می‌کند و از برچسب‌های رویداد تعیین می‌شود.
+  یعنی یک لبه‌ی ناخالص ثابت، در یک دسته معامله است و در دسته‌ی دیگر ضرر.
+  بر پایه‌ی <span class="num">{{ scans }}</span> اسکن اخیر.
+</p>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="scans">تعداد اسکن</label>
+    <select id="scans" name="scans" onchange="this.form.submit()">
+      {% for n in [5, 10, 20, 50, 100] %}
+        <option value="{{ n }}" {{ 'selected' if scans == n }}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="panel">
+  <h2>کدام نرخ‌ها واقعاً لبه تولید می‌کنند</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>کارمزد</th><th>بازار تحلیل‌شده</th><th>نزدیک</th><th>فرصت</th>
+        <th>میانگین ناخالص</th><th>میانگین خالص</th><th>بهترین خالص</th>
+      </tr></thead>
+      <tbody>
+        {% for r in by_fee %}
+        <tr>
+          <td><span class="tag {{ 'good' if r.fee_rate == 0 else ('bad' if r.fee_rate >= 0.06 else '') }}">{{ r.fee_rate|pct(1) }}</span></td>
+          <td class="num">{{ '{:,}'.format(r.analysed) }}</td>
+          <td class="num">{{ r.near_misses or 0 }}</td>
+          <td class="num {{ 'good' if r.opportunities else '' }}">{{ r.opportunities or 0 }}</td>
+          <td class="num">{{ r.avg_gross|pct(3) }}</td>
+          <td class="num">{{ r.avg_edge|pct(3) }}</td>
+          <td class="num {{ 'good' if r.best_edge and r.best_edge > 0 else '' }}">{{ r.best_edge|pct(3) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7" class="empty">هنوز داده‌ای نیست.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="body" style="border-top:1px solid var(--border);color:var(--muted);font-size:13px;line-height:1.9">
+    فاصله‌ی بین «میانگین ناخالص» و «میانگین خالص» همان چیزی است که کارمزد می‌برد.
+    در دسته‌ی ۰٪ این دو باید تقریباً یکی باشند؛ هر جا فاصله زیاد است، لبه باید
+    به همان اندازه بزرگ‌تر باشد تا معامله معنا بدهد.
+  </div>
+</div>
+
+<div class="panel">
+  <h2>دسته‌ها</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>دسته</th><th>کارمزد</th><th>تعداد بازار</th><th>بهترین لبه‌ی خالص</th></tr></thead>
+      <tbody>
+        {% for r in by_category %}
+        <tr>
+          <td class="wrap">{{ r.cat }}</td>
+          <td><span class="tag {{ 'good' if r.fee_rate == 0 else ('bad' if r.fee_rate and r.fee_rate >= 0.06 else '') }}">{{ r.fee_rate|pct(1) }}</span></td>
+          <td class="num">{{ '{:,}'.format(r.n) }}</td>
+          <td class="num {{ 'good' if r.best_edge and r.best_edge > 0 else '' }}">{{ r.best_edge|pct(3) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

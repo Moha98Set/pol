@@ -477,3 +477,258 @@ def test_a_failing_callback_does_not_take_down_the_engine(engine, monkeypatch):
          asks_by_leg=[(0.30, 500), (0.30, 500), (0.30, 500)])
 
     assert watched.signal is not None      # engine survived
+
+
+# =====================================================================
+# Edge recording — the shape of a window, not just its peak
+# =====================================================================
+
+
+@pytest.fixture
+def recording_engine(tmp_path, monkeypatch):
+    """
+    An engine that records to a scratch database.
+
+    min_edge stays at the production 0.003 while the record band is far
+    below it, because the episodes worth capturing are precisely the ones
+    that never cross min_edge.
+    """
+    import db as dblib
+    monkeypatch.setattr(config, "LIVE_RECORD", True)
+    monkeypatch.setattr(config, "LIVE_RECORD_MIN_EDGE", -0.02)
+    monkeypatch.setattr(config, "LIVE_TICK_MIN_INTERVAL_MS", 0)
+    monkeypatch.setattr(config, "MIN_WINDOW_MS", 0)
+
+    eng = LiveEngine(store=False, capitals=[100], min_edge=0.003)
+    eng.db = dblib.connect(tmp_path / "live.db")
+    eng.record = True
+    yield eng
+    eng.db.close()
+
+
+def push(engine, watched, edge, sum_asks=1.0):
+    """Push one evaluation result through the recorder."""
+    engine._record_edge(watched, "yes",
+                        {"sum_best_asks": sum_asks, "net_edge": edge}, edge)
+
+
+def test_an_edge_inside_the_band_opens_a_window(recording_engine):
+    watched = watch(recording_engine, "dip")
+
+    push(recording_engine, watched, -0.005, sum_asks=1.005)
+
+    row = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert row is not None
+    assert row["event_slug"] == "dip"
+    assert row["closed_at"] is None          # still open
+    assert row["crossed"] == 0               # never beat min_edge
+
+
+def test_an_edge_below_the_band_records_nothing(recording_engine):
+    watched = watch(recording_engine, "far")
+
+    push(recording_engine, watched, -0.5, sum_asks=1.5)
+
+    assert recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_windows").fetchone()["c"] == 0
+
+
+def test_a_window_keeps_the_best_moment_not_the_last(recording_engine):
+    """
+    The analysts' scenario: a market dips, reaches its lowest price, then
+    recovers. The row must remember the bottom, not wherever it happened to
+    be when the window closed.
+    """
+    watched = watch(recording_engine, "dipspike")
+
+    push(recording_engine, watched, -0.010, sum_asks=1.010)   # opens
+    push(recording_engine, watched, -0.002, sum_asks=1.002)   # dips
+    push(recording_engine, watched,  0.004, sum_asks=0.996)   # the bottom
+    push(recording_engine, watched, -0.008, sum_asks=1.008)   # recovers
+    push(recording_engine, watched, -0.50,  sum_asks=1.50)    # leaves band
+
+    row = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert row["closed_at"] is not None
+    assert row["best_edge"] == pytest.approx(0.004)
+    assert row["best_sum_asks"] == pytest.approx(0.996)
+    assert row["closed_edge"] == pytest.approx(-0.50)
+    assert row["crossed"] == 1               # 0.004 beat min_edge 0.003
+
+
+def test_every_tick_of_the_window_is_kept(recording_engine):
+    watched = watch(recording_engine, "shape")
+
+    for edge in (-0.010, -0.006, -0.001, 0.002, -0.004):
+        push(recording_engine, watched, edge, sum_asks=1 - edge)
+    push(recording_engine, watched, -0.9)     # closes and flushes
+
+    ticks = recording_engine.db.execute(
+        "SELECT * FROM edge_ticks ORDER BY id").fetchall()
+    assert len(ticks) == 5
+    assert [t["comparable_edge"] for t in ticks] == pytest.approx(
+        [-0.010, -0.006, -0.001, 0.002, -0.004])
+
+
+def test_leaving_and_re_entering_the_band_makes_two_windows(recording_engine):
+    watched = watch(recording_engine, "twice")
+
+    push(recording_engine, watched, -0.005)
+    push(recording_engine, watched, -0.9)     # out
+    push(recording_engine, watched, -0.004)   # back in
+    push(recording_engine, watched, -0.9)     # out again
+
+    rows = recording_engine.db.execute("SELECT * FROM edge_windows").fetchall()
+    assert len(rows) == 2
+    assert all(r["closed_at"] for r in rows)
+
+
+def test_a_momentary_graze_is_not_kept_as_an_episode(recording_engine,
+                                                     monkeypatch):
+    """
+    One stray evaluation is noise. Left in, it would drag down every
+    average of "how long do these windows last".
+    """
+    monkeypatch.setattr(config, "MIN_WINDOW_MS", 5000)
+    watched = watch(recording_engine, "graze")
+
+    push(recording_engine, watched, -0.005)
+    push(recording_engine, watched, -0.9)     # closes immediately
+
+    assert recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_windows").fetchone()["c"] == 0
+    assert recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_ticks").fetchone()["c"] == 0
+
+
+def test_a_short_window_that_crossed_the_threshold_is_kept_anyway(
+        recording_engine, monkeypatch):
+    """A real signal is never noise, however briefly it lasted."""
+    monkeypatch.setattr(config, "MIN_WINDOW_MS", 5000)
+    watched = watch(recording_engine, "brief")
+
+    push(recording_engine, watched, 0.02, sum_asks=0.98)
+    push(recording_engine, watched, -0.9)
+
+    row = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert row is not None
+    assert row["crossed"] == 1
+
+
+def test_ticks_are_rate_limited(recording_engine, monkeypatch):
+    monkeypatch.setattr(config, "LIVE_TICK_MIN_INTERVAL_MS", 60_000)
+    watched = watch(recording_engine, "busy")
+
+    for _ in range(20):
+        push(recording_engine, watched, -0.005)
+    push(recording_engine, watched, -0.9)
+
+    ticks = recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_ticks").fetchone()["c"]
+    assert ticks == 1          # the first; the rest fall inside the interval
+
+
+def test_a_window_left_open_by_a_previous_run_is_closed_on_start(
+        recording_engine):
+    import db as dblib
+    watched = watch(recording_engine, "orphan")
+    push(recording_engine, watched, -0.005)          # leaves one open
+
+    assert dblib.close_orphan_windows(recording_engine.db) == 1
+    row = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert row["closed_at"] is not None
+
+
+def test_a_dip_and_recovery_is_recorded_end_to_end(recording_engine):
+    """
+    The whole chain on the path that actually runs: book updates arrive,
+    the engine re-evaluates, and the recorder keeps the shape.
+
+    This is the analysts' case — a basket drifts down below a dollar for a
+    while and then recovers. arb_monitor, scanning every fifteen minutes,
+    can miss the entire episode; the socket sees every step of it.
+    """
+    watch(recording_engine, "dip", n=3)
+
+    # 1.02 — inside the record band, nowhere near tradeable
+    feed(recording_engine, "dip",
+         asks_by_leg=[(0.34, 500), (0.34, 500), (0.34, 500)])
+    # 0.99 — the bottom, and past min_edge
+    feed(recording_engine, "dip",
+         asks_by_leg=[(0.33, 500), (0.33, 500), (0.33, 500)])
+    # 1.11 — back out of the band, closing the window
+    feed(recording_engine, "dip",
+         asks_by_leg=[(0.37, 500), (0.37, 500), (0.37, 500)])
+
+    win = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert win is not None, "the episode left no record"
+    assert win["event_slug"] == "dip"
+    assert win["closed_at"] is not None
+    assert win["crossed"] == 1
+    # the bottom is remembered, not the price it recovered to
+    assert win["best_sum_asks"] == pytest.approx(0.99)
+
+    # One tick per re-evaluation, and the engine re-evaluates on every
+    # token update rather than once per event — so a three-leg basket
+    # repriced leg by leg is recorded stepping down 1.01, 1.00, 0.99.
+    # That granularity is the point: it is the shape of the move.
+    ticks = recording_engine.db.execute(
+        "SELECT * FROM edge_ticks WHERE window_id = ? ORDER BY ts_ms",
+        (win["id"],)).fetchall()
+    prices = [t["sum_best_asks"] for t in ticks]
+    assert prices == sorted(prices, reverse=True), "the dip lost its order"
+    assert prices[-1] == pytest.approx(0.99)
+    assert win["ticks"] == len(ticks)
+
+
+def test_a_basket_that_never_enters_the_band_leaves_no_trace(recording_engine):
+    watch(recording_engine, "quiet", n=3)
+
+    feed(recording_engine, "quiet",
+         asks_by_leg=[(0.50, 500), (0.50, 500), (0.50, 500)])   # 1.50
+
+    assert recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_windows").fetchone()["c"] == 0
+
+
+def test_a_window_records_how_much_could_be_filled(recording_engine):
+    """
+    Price says whether an edge existed; depth says whether it was worth
+    anything. A window that never held more than a few dollars is a
+    curiosity, and only this column can tell it from a real one.
+    """
+    watch(recording_engine, "deep", n=3)
+
+    feed(recording_engine, "deep",
+         asks_by_leg=[(0.33, 5000), (0.33, 5000), (0.33, 5000)])
+    feed(recording_engine, "deep",
+         asks_by_leg=[(0.40, 5000), (0.40, 5000), (0.40, 5000)])   # closes
+
+    win = recording_engine.db.execute("SELECT * FROM edge_windows").fetchone()
+    assert win["best_capital"] is not None
+    assert win["best_capital"] > 0
+    assert win["best_profit"] is not None
+
+    tick = recording_engine.db.execute(
+        "SELECT * FROM edge_ticks ORDER BY ts_ms LIMIT 1").fetchone()
+    assert tick["fillable_capital"] is not None
+
+
+def test_a_thin_window_is_distinguishable_from_a_deep_one(recording_engine):
+    """The whole point: same price, different money."""
+    watch(recording_engine, "thin", n=3)
+    feed(recording_engine, "thin",
+         asks_by_leg=[(0.33, 3), (0.33, 3), (0.33, 3)])
+    feed(recording_engine, "thin", asks_by_leg=[(0.40, 3), (0.40, 3), (0.40, 3)])
+
+    watch(recording_engine, "fat", n=3)
+    feed(recording_engine, "fat",
+         asks_by_leg=[(0.33, 9000), (0.33, 9000), (0.33, 9000)])
+    feed(recording_engine, "fat",
+         asks_by_leg=[(0.40, 9000), (0.40, 9000), (0.40, 9000)])
+
+    by_slug = {r["event_slug"]: r for r in recording_engine.db.execute(
+        "SELECT * FROM edge_windows")}
+    assert by_slug["thin"]["best_capital"] < by_slug["fat"]["best_capital"]
+    # identical prices, so the edge alone could never separate them
+    assert by_slug["thin"]["best_sum_asks"] == pytest.approx(
+        by_slug["fat"]["best_sum_asks"])

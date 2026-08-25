@@ -184,8 +184,11 @@ pre.logs{
       <a href="{{ url_for('overview') }}"      class="{{ 'on' if p == '/' }}">خلاصه</a>
       <a href="{{ url_for('opportunities') }}" class="{{ 'on' if p.startswith('/opportunit') }}">فرصت‌ها</a>
       <a href="{{ url_for('near_misses') }}"   class="{{ 'on' if p.startswith('/near') }}">نزدیک‌ترین‌ها</a>
-      <a href="{{ url_for('markets') }}"       class="{{ 'on' if p.startswith('/market') }}">بازارها</a>
+      <a href="{{ url_for('markets') }}"       class="{{ 'on' if p.startswith('/markets') or p.startswith('/market/') }}">بازارها</a>
       <a href="{{ url_for('rejected') }}"      class="{{ 'on' if p.startswith('/rejected') }}">ردشده‌ها</a>
+      <a href="{{ url_for('windows') }}"       class="{{ 'on' if p.startswith('/window') }}">پنجره‌ها</a>
+      <a href="{{ url_for('distribution') }}"  class="{{ 'on' if p.startswith('/distribution') }}">توزیع</a>
+      <a href="{{ url_for('fees_view') }}"     class="{{ 'on' if p.startswith('/fees') }}">کارمزدها</a>
       <a href="{{ url_for('funnel') }}"        class="{{ 'on' if p.startswith('/funnel') }}">قیف</a>
       <a href="{{ url_for('system') }}"        class="{{ 'on' if p.startswith('/system') }}">سیستم</a>
       <a href="{{ url_for('glossary_page') }}" class="{{ 'on' if p.startswith('/glossary') }}">واژه‌نامه</a>

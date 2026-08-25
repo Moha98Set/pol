@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}{{ win.event_title or win.event_slug }} — پنجره{% endblock %}
+{% block body %}
+
+<h1>{{ win.event_title or win.event_slug }}</h1>
+<p class="sub">
+  پنجره #{{ win.id }} — باز شد {{ win.opened_at|ago }}
+  {% if win.url %}· <a href="{{ win.url }}" target="_blank" rel="noopener">مشاهده در پالی‌مارکت</a>{% endif %}
+  · <a href="{{ url_for('market_detail', slug=win.event_slug) }}">تاریخچه‌ی این بازار</a>
+</p>
+
+<div class="cards">
+  <div class="card"><div class="k">طول</div>
+    <div class="v num">{{ (win.duration_ms / 60000)|fa_num(1) }}<span style="font-size:14px"> دقیقه</span></div>
+    {% if win.closed_at %}<div class="note">بسته شد {{ win.closed_at|ago }}</div>
+    {% else %}<div class="note warn">هنوز باز است</div>{% endif %}</div>
+  <div class="card"><div class="k">بهترین لبه</div>
+    <div class="v num {{ 'good' if win.best_edge and win.best_edge > 0 else '' }}">{{ win.best_edge|pct(3) }}</div>
+    <div class="note">در {{ win.best_at|ago }}</div></div>
+  <div class="card"><div class="k">کف قیمت سبد</div>
+    <div class="v num">{{ win.best_sum_asks|fa_num(4) }}</div>
+    <div class="note">پرداخت تضمینی {{ win.payout|fa_num(0) }} دلار</div></div>
+  <div class="card"><div class="k">بیشترین قابل جذب</div>
+    <div class="v num {{ 'bad' if win.best_capital is not none and win.best_capital < 20 else '' }}">{{ win.best_capital|money(0) }}</div>
+    <div class="note">سود {{ win.best_profit|money(2) }}</div></div>
+  <div class="card"><div class="k">کارمزد</div>
+    <div class="v num">{{ win.fee_rate|pct(1) }}</div></div>
+  <div class="card"><div class="k">سمت</div>
+    <div class="v" style="font-size:19px">{{ 'خرید بله' if win.side == 'yes' else 'خرید نه' }}</div>
+    <div class="note">{{ win.num_outcomes }} گزینه</div></div>
+  <div class="card"><div class="k">نتیجه</div>
+    <div class="v" style="font-size:19px">
+      {% if win.crossed %}<span class="tag good">سیگنال شد</span>
+      {% else %}<span class="tag">فقط نزدیک</span>{% endif %}</div></div>
+</div>
+
+{% if ticks|length > 1 %}
+<div class="panel">
+  <h2>شکل حرکت داخل پنجره</h2>
+  <div class="body">
+    {% set vals = ticks | map(attribute='comparable_edge') | list %}
+    {% set lo = vals | min %}{% set hi = vals | max %}
+    {% set span = (hi - lo) if (hi - lo) > 0 else 0.0001 %}
+    {% set t0 = ticks[0].ts_ms %}
+    {% set raw_span = ticks[-1].ts_ms - t0 %}
+    {# A burst of updates inside the same second leaves every tick on the
+       same millisecond, which would stack the whole series on x=0. Below a
+       second of total span, space the points evenly instead: the shape is
+       what carries the meaning, and the timings are in the table below. #}
+    {% set by_time = raw_span >= 1000 %}
+    {% set tspan = raw_span if by_time else 1 %}
+
+    <svg viewBox="0 0 800 220" preserveAspectRatio="none"
+         style="display:block;width:100%;height:220px" role="img"
+         aria-label="روند لبه در طول پنجره">
+      <!-- the break-even line: above it the basket is profitable -->
+      {% if lo <= 0 <= hi %}
+        {% set zero_y = 200 - ((0 - lo) / span * 180) %}
+        <line x1="0" y1="{{ zero_y }}" x2="800" y2="{{ zero_y }}"
+              stroke="var(--good)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.8"/>
+        <text x="6" y="{{ zero_y - 6 }}" fill="var(--good)" font-size="12">نقطه‌ی سربه‌سر</text>
+      {% endif %}
+      <polyline fill="none" stroke="var(--accent)" stroke-width="2.5"
+        points="{% for t in ticks %}{{ ((t.ts_ms - t0) / tspan * 800) if by_time else (loop.index0 * 800 / ((ticks|length - 1) or 1)) }},{{ 200 - ((t.comparable_edge - lo) / span * 180) }} {% endfor %}"/>
+      {% for t in ticks %}
+        <circle cx="{{ ((t.ts_ms - t0) / tspan * 800) if by_time else (loop.index0 * 800 / ((ticks|length - 1) or 1)) }}"
+                cy="{{ 200 - ((t.comparable_edge - lo) / span * 180) }}"
+                r="3" fill="var(--accent)"/>
+      {% endfor %}
+    </svg>
+
+    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-top:6px">
+      <span>شروع</span>
+      <span>بیشترین <span class="num">{{ hi|pct(3) }}</span> · کمترین <span class="num">{{ lo|pct(3) }}</span></span>
+      <span>پایان</span>
+    </div>
+
+    <p class="sub" style="margin-top:14px">
+      هرچه خط بالاتر برود، سبد ارزان‌تر و سود بیشتر است. عبور از خط چین‌دار یعنی
+      خرید کل سبد از پرداختی که تضمین می‌کند ارزان‌تر تمام می‌شود.
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>تیک‌های ثبت‌شده</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>زمان</th><th>از شروع</th><th>مجموع قیمت</th><th>لبه</th><th>قابل جذب</th></tr></thead>
+      <tbody>
+        {% for t in ticks %}
+        <tr {% if t.comparable_edge == win.best_edge %}style="background:var(--good-soft)"{% endif %}>
+          <td class="num" title="{{ t.recorded_at }}">{{ t.recorded_at[11:19] }}</td>
+          <td class="num">{{ ((t.ts_ms - ticks[0].ts_ms) / 1000)|fa_num(1) }}s</td>
+          <td class="num">{{ t.sum_best_asks|fa_num(4) }}</td>
+          <td class="num {{ 'good' if t.comparable_edge > 0 else '' }}">{{ t.comparable_edge|pct(3) }}</td>
+          <td class="num">{{ t.fillable_capital|money(0) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="empty">
+          تیک‌های این پنجره هرس شده‌اند. خلاصه‌ی بالا باقی می‌ماند.
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% if others %}
+<div class="panel">
+  <h2>پنجره‌های دیگر همین بازار</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>باز شد</th><th>طول</th><th>بهترین لبه</th><th>کف</th><th>سیگنال؟</th></tr></thead>
+      <tbody>
+        {% for o in others %}
+        <tr>
+          <td><a href="{{ url_for('window_detail', window_id=o.id) }}">{{ o.opened_at|ago }}</a></td>
+          <td class="num">{{ (o.duration_ms / 60000)|fa_num(1) }} دقیقه</td>
+          <td class="num {{ 'good' if o.best_edge and o.best_edge > 0 else '' }}">{{ o.best_edge|pct(3) }}</td>
+          <td class="num">{{ o.best_sum_asks|fa_num(4) }}</td>
+          <td>{{ 'بله' if o.crossed else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="body" style="border-top:1px solid var(--border);color:var(--muted);font-size:13px">
+    بازاری که بارها پنجره باز می‌کند، الگو دارد؛ یک‌بار نزدیک شدن معمولاً مظنه‌ی کهنه است.
+  </div>
+</div>
+{% endif %}
+
+<p><a class="btn ghost" href="{{ url_for('windows') }}">بازگشت به پنجره‌ها</a></p>
+
+{% endblock %}

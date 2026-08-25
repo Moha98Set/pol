@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}توزیع لبه — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>توزیع لبه و حساسیت آستانه</h1>
+<p class="sub">
+  تب «فرصت‌ها» خالی است. این صفحه می‌گوید علتش چیست: بازار لبه‌ای نمی‌دهد،
+  یا آستانه‌ی ما بالاتر از جایی است که لبه‌ها هستند.
+  بر پایه‌ی <span class="num">{{ scans }}</span> اسکن اخیر.
+</p>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="scans">تعداد اسکن</label>
+    <select id="scans" name="scans" onchange="this.form.submit()">
+      {% for n in [5, 10, 20, 50, 100] %}
+        <option value="{{ n }}" {{ 'selected' if scans == n }}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+{% if not edges %}
+<div class="panel"><div class="empty">
+  <div class="big">هنوز داده‌ی لبه‌ای ثبت نشده است.</div>
+  <div style="max-width:560px;margin:10px auto 0;line-height:1.9">
+    بعد از اولین اسکن پر می‌شود.
+  </div>
+</div></div>
+{% else %}
+
+<div class="cards">
+  <div class="card"><div class="k">بازار با لبه‌ی اندازه‌گیری‌شده</div>
+    <div class="v num">{{ '{:,}'.format(edges|length) }}</div></div>
+  <div class="card"><div class="k">بهترین لبه</div>
+    <div class="v num {{ 'good' if best > 0 else '' }}">{{ best|pct(3) }}</div></div>
+  <div class="card"><div class="k">میانه</div>
+    <div class="v num">{{ median|pct(3) }}</div></div>
+  <div class="card"><div class="k">آستانه‌ی فعلی</div>
+    <div class="v num warn">{{ current|pct(3) }}</div>
+    <div class="note">MIN_NET_EDGE</div></div>
+  {% if windows_best is not none %}
+  <div class="card"><div class="k">بهترین لبه‌ی موتور زنده</div>
+    <div class="v num {{ 'good' if windows_best and windows_best > 0 else '' }}">{{ windows_best|pct(3) }}</div>
+    <div class="note">از پنجره‌های ثبت‌شده</div></div>
+  {% endif %}
+</div>
+
+<div class="panel">
+  <h2>اگر آستانه را عوض کنیم، چند بازار واجد شرایط می‌شوند</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0">
+      این ستون‌ها فرصت تضمین‌شده نیستند — فقط می‌گویند چند بازار در این پنجره از آن حد گذشتند.
+      پایین آوردن آستانه ریسک را هم بالا می‌برد: لبه‌ی نازک اولین چیزی است که اسلیپیج می‌خورد.
+    </p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>آستانه</th><th>تعداد واجد شرایط</th><th>سهم</th><th></th></tr></thead>
+        <tbody>
+          {% for s in sensitivity %}
+          <tr {% if s.threshold == current %}style="background:var(--warn-soft)"{% endif %}>
+            <td class="num">{{ s.threshold|pct(3) }}</td>
+            <td class="num {{ 'good' if s.n else '' }}">{{ s.n }}</td>
+            <td class="num">{{ (s.n / edges|length * 100)|fa_num(2) }}٪</td>
+            <td>{% if s.threshold == current %}<span class="tag warn">آستانه‌ی فعلی</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2>توزیع لبه‌ی خالص</h2>
+  <div class="body">
+    {% set peak = hist | map(attribute='n') | max %}
+    <div style="display:flex;align-items:flex-end;gap:2px;height:170px;direction:ltr">
+      {% for b in hist %}
+        <div style="flex:1;display:flex;align-items:flex-end;height:100%"
+             title="{{ '%.3f'|format(b.lo * 100) }}٪ تا {{ '%.3f'|format(b.hi * 100) }}٪ — {{ b.n }} بازار">
+          <div style="width:100%;border-radius:2px 2px 0 0;
+                      height:{{ (b.n / peak * 100) if peak else 0 }}%;
+                      background:{{ 'var(--good)' if b.lo >= 0 else 'var(--accent)' }}"></div>
+        </div>
+      {% endfor %}
+    </div>
+    <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px;margin-top:8px;direction:ltr">
+      <span class="num">{{ hist[0].lo|pct(2) }}</span>
+      <span class="num">{{ hist[-1].hi|pct(2) }}</span>
+    </div>
+    <p class="sub" style="margin-top:14px">
+      ستون‌های سبز بازارهایی هستند که لبه‌شان مثبت بود. توزیع در
+      <span class="num">{{ near_miss_floor|pct(1) }}</span> بریده می‌شود — بازارهایی که از آن هم
+      دورترند عددشان ذخیره نمی‌شود، چون فاصله‌شان تا سودآوری برای تحلیل معنا ندارد.
+    </p>
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}

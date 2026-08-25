@@ -28,6 +28,28 @@
 </div>
 
 <div class="panel">
+  <h2>اصطلاح‌ها</h2>
+  <div class="body" style="padding-bottom:4px">
+    <p class="sub" style="margin-top:0">
+      اعدادی که در همه‌ی جدول‌ها می‌بینید، و اینکه هرکدام دقیقاً چه چیزی را می‌سنجند.
+    </p>
+  </div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>اصطلاح</th><th>یعنی چه</th></tr></thead>
+      <tbody>
+        {% for key, (label, text) in terms.items() %}
+        <tr>
+          <td style="vertical-align:top"><span class="tag info">{{ label }}</span></td>
+          <td class="wrap" style="max-width:none;line-height:1.95">{{ text|safe }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="panel">
   <h2>مراحل بررسی</h2>
   <div class="scroll">
     <table>

@@ -29,14 +29,11 @@ In production it runs under systemd; see deploy/polly-dash.service.
 
 import argparse
 import getpass
-import hashlib
-import hmac
 import json
 import os
 import secrets
 import sqlite3
 import subprocess
-import time
 from collections import defaultdict
 from datetime import datetime, timezone
 from functools import wraps
@@ -46,6 +43,7 @@ from flask import (Flask, abort, flash, g, redirect, render_template,
                    request, session, url_for)
 
 import config
+import dashauth
 import glossary
 
 # =====================================================================
@@ -54,6 +52,13 @@ import glossary
 
 DB_PATH = Path(config.DB_PATH) if config.DB_PATH else (
     Path(__file__).parent / "arb_monitor.db")
+
+# Accounts live in their own database next to the market one. The two env
+# vars are the pre-accounts single login and are still honoured: on first
+# start they are imported as the first account, so an existing deployment
+# keeps working through the upgrade instead of locking everyone out.
+AUTH_DB_PATH = Path(os.getenv("POLLY_DASH_AUTH_DB") or
+                    (DB_PATH.parent / "dashboard.db"))
 
 DASH_USER = os.getenv("POLLY_DASH_USER", "")
 DASH_PASSWORD_HASH = os.getenv("POLLY_DASH_PASSWORD_HASH", "")
@@ -69,12 +74,6 @@ UNITS = ("polly-monitor", "polly-live", "polly-dash")
 
 PAGE_SIZE = 50
 
-# Failed logins per IP. In memory on purpose: a restart clearing the
-# counters is fine, and it keeps the dashboard free of another table.
-_failures = defaultdict(list)
-LOCKOUT_ATTEMPTS = 8
-LOCKOUT_SECONDS = 300
-
 app = Flask(__name__)
 app.config.update(
     SECRET_KEY=SECRET_KEY or secrets.token_hex(32),
@@ -85,43 +84,46 @@ app.config.update(
 
 
 # =====================================================================
-# Passwords
+# Accounts
 # =====================================================================
-# scrypt from the standard library rather than a dependency. The stored
-# form is  scrypt$<salt>$<key>  so the parameters can change later without
-# invalidating what is already in the environment file.
+# The hashing itself lives in dashauth so the CLI and the request path
+# cannot drift apart on scrypt parameters.
 
-SCRYPT = dict(n=2 ** 14, r=8, p=1, dklen=32, maxmem=64 * 1024 * 1024)
-
-
-def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    key = hashlib.scrypt(password.encode("utf-8"), salt=salt, **SCRYPT)
-    return f"scrypt${salt.hex()}${key.hex()}"
+hash_password = dashauth.hash_password
 
 
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        algo, salt_hex, key_hex = stored.split("$")
-        if algo != "scrypt":
-            return False
-        key = hashlib.scrypt(password.encode("utf-8"),
-                             salt=bytes.fromhex(salt_hex), **SCRYPT)
-    except (ValueError, TypeError):
-        return False
-    # compare_digest, not ==, so a wrong password cannot be narrowed down
-    # by timing how long the comparison took.
-    return hmac.compare_digest(key.hex(), key_hex)
+def auth_db():
+    if "auth" not in g:
+        conn = dashauth.connect(AUTH_DB_PATH)
+        _seed_first_account(conn)
+        g.auth = conn
+    return g.auth
 
 
-def locked_out(ip: str) -> int:
-    """Seconds remaining on this IP's lockout, 0 if it may try again."""
-    now = time.time()
-    recent = [t for t in _failures[ip] if now - t < LOCKOUT_SECONDS]
-    _failures[ip] = recent
-    if len(recent) < LOCKOUT_ATTEMPTS:
-        return 0
-    return int(LOCKOUT_SECONDS - (now - recent[0]))
+def _seed_first_account(conn):
+    """
+    Carry the pre-accounts single login into the users table, once.
+
+    Without this, upgrading a running dashboard would leave nobody able to
+    log in until someone read the release notes.
+    """
+    if dashauth.user_count(conn) or not (DASH_USER and DASH_PASSWORD_HASH):
+        return
+    conn.execute("""
+        INSERT INTO dash_users (username, display_name, password_hash,
+                                created_at)
+        VALUES (?, ?, ?, ?)
+    """, (DASH_USER, "imported from polly.env", DASH_PASSWORD_HASH,
+          dashauth.utcnow()))
+    conn.commit()
+    app.logger.info("imported %r from the environment as the first account",
+                    DASH_USER)
+
+
+def client_ip() -> str:
+    return (request.headers.get("X-Forwarded-For",
+                                request.remote_addr or "?")
+            .split(",")[0].strip())
 
 
 def login_required(view):
@@ -150,9 +152,10 @@ def db():
 
 @app.teardown_appcontext
 def close_db(_exc):
-    conn = g.pop("db", None)
-    if conn is not None:
-        conn.close()
+    for key in ("db", "auth"):
+        conn = g.pop(key, None)
+        if conn is not None:
+            conn.close()
 
 
 def rows(sql, params=()):
@@ -238,39 +241,41 @@ app.jinja_env.globals.update(reason=glossary.reason, stage_note=stage_note,
 # =====================================================================
 
 
+REFUSAL_TEXT = {
+    "too_many_for_user": "تلاش‌های ناموفق زیاد برای این حساب. چند دقیقه صبر کنید.",
+    "too_many_for_ip": "تلاش‌های ناموفق زیاد از این آدرس. بعداً امتحان کنید.",
+    "disabled": "این حساب غیرفعال شده است.",
+    "bad_credentials": "نام کاربری یا رمز عبور نادرست است.",
+}
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    if not DASH_USER or not DASH_PASSWORD_HASH:
+    conn = auth_db()
+    if not dashauth.user_count(conn):
         return render_template("unconfigured.html"), 503
 
-    ip = request.headers.get("X-Forwarded-For",
-                             request.remote_addr or "?").split(",")[0].strip()
-
     if request.method == "POST":
-        wait = locked_out(ip)
-        if wait:
-            flash(f"تلاش‌های ناموفق زیاد. {wait} ثانیه دیگر دوباره امتحان کنید.")
-            return render_template("login.html"), 429
-
-        user = request.form.get("username", "")
+        username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        # Both checks always run: returning early on an unknown username
-        # would make usernames discoverable by response time.
-        user_ok = hmac.compare_digest(user, DASH_USER)
-        pass_ok = verify_password(password, DASH_PASSWORD_HASH)
 
-        if user_ok and pass_ok:
-            _failures.pop(ip, None)
+        user, reason = dashauth.authenticate(
+            conn, username, password, ip=client_ip(),
+            user_agent=request.headers.get("User-Agent", ""))
+
+        if user is not None:
             session.clear()
-            session["user"] = user
+            session["user"] = user["username"]
+            session["display"] = user["display_name"] or user["username"]
             session.permanent = True
             nxt = request.args.get("next", "")
             # Only relative paths, so ?next= cannot bounce a logged-in user
             # to another site.
             return redirect(nxt if nxt.startswith("/") else url_for("overview"))
 
-        _failures[ip].append(time.time())
-        flash("نام کاربری یا رمز عبور نادرست است.")
+        flash(REFUSAL_TEXT.get(reason, REFUSAL_TEXT["bad_credentials"]))
+        if reason in ("too_many_for_user", "too_many_for_ip"):
+            return render_template("login.html"), 429
 
     return render_template("login.html")
 
@@ -422,6 +427,16 @@ def _verdict_filters():
         clauses.append("event_title LIKE ?")
         params.append(f"%{q}%")
 
+    # Flagged-but-not-rejected markets had no way to be found: they carry
+    # no rejection code, so filtering by reason never surfaced them, and
+    # they look identical to clean ones in the table.
+    suspicion = request.args.get("suspicion", "")
+    if suspicion == "any":
+        clauses.append("suspicions != '[]' AND suspicions IS NOT NULL")
+    elif suspicion:
+        clauses.append("suspicions LIKE ?")
+        params.append(f'%"{suspicion}"%')
+
     return " WHERE " + " AND ".join(clauses), params
 
 
@@ -444,6 +459,7 @@ def markets():
     return render_template(
         "markets.html", items=items, total=total, page=page,
         pages=_pages(total), title="بازارهای بررسی‌شده",
+        suspicions=glossary.SUSPICIONS,
         codes=_codes_in_scope(), scans=_recent_scan_ids(),
         show_outcome_filter=True)
 
@@ -474,6 +490,7 @@ def rejected():
     return render_template(
         "markets.html", items=items, total=total, page=page,
         pages=_pages(total), title="بازارهای رد شده",
+        suspicions=glossary.SUSPICIONS,
         codes=_codes_in_scope(rejected_only=True), scans=_recent_scan_ids(),
         breakdown=breakdown, show_outcome_filter=False)
 
@@ -505,6 +522,155 @@ def market_detail(slug):
         "market_detail.html", slug=slug, latest=latest, history=history,
         misses=misses, opps=opps, trend=trend,
         suspicions=json.loads(latest["suspicions"] or "[]"))
+
+
+# =====================================================================
+# Edge windows — short-lived episodes
+# =====================================================================
+
+
+@app.route("/windows")
+@login_required
+def windows():
+    if not table_exists("edge_windows"):
+        return render_template("no_windows.html")
+
+    page = max(1, request.args.get("page", 1, type=int))
+    crossed_only = request.args.get("crossed") == "1"
+    min_minutes = request.args.get("min_minutes", 0, type=float)
+
+    clauses, params = ["closed_at IS NOT NULL"], []
+    if crossed_only:
+        clauses.append("crossed = 1")
+    if min_minutes:
+        clauses.append("duration_ms >= ?")
+        params.append(min_minutes * 60_000)
+    where = " WHERE " + " AND ".join(clauses)
+
+    total = one(f"SELECT COUNT(*) c FROM edge_windows{where}", params)["c"]
+    items = rows(f"""
+        SELECT * FROM edge_windows{where}
+        ORDER BY opened_at DESC LIMIT ? OFFSET ?
+    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
+
+    summary = one("""
+        SELECT COUNT(*) n,
+               SUM(crossed) crossed,
+               AVG(duration_ms) avg_ms,
+               MAX(duration_ms) max_ms,
+               MAX(best_edge) best
+        FROM edge_windows WHERE closed_at IS NOT NULL
+    """)
+    live = one("SELECT COUNT(*) c FROM edge_windows "
+               "WHERE closed_at IS NULL")["c"]
+
+    # How long these episodes last, in buckets an analyst can act on: a
+    # window under a minute is unreachable by hand, one over ten is a
+    # different kind of opportunity entirely.
+    buckets = rows("""
+        SELECT CASE
+                 WHEN duration_ms <   60000 THEN 'زیر ۱ دقیقه'
+                 WHEN duration_ms <  300000 THEN '۱ تا ۵ دقیقه'
+                 WHEN duration_ms <  600000 THEN '۵ تا ۱۰ دقیقه'
+                 WHEN duration_ms < 1800000 THEN '۱۰ تا ۳۰ دقیقه'
+                 ELSE 'بیش از ۳۰ دقیقه'
+               END bucket,
+               COUNT(*) n, SUM(crossed) crossed
+        FROM edge_windows WHERE closed_at IS NOT NULL
+        GROUP BY bucket ORDER BY MIN(duration_ms)
+    """)
+
+    # Time of day, so "when do these happen" is answerable. Stored UTC.
+    by_hour = rows("""
+        SELECT CAST(strftime('%H', opened_at) AS INTEGER) hour, COUNT(*) n
+        FROM edge_windows WHERE closed_at IS NOT NULL
+        GROUP BY hour ORDER BY hour
+    """)
+
+    return render_template(
+        "windows.html", items=items, total=total, page=page,
+        pages=_pages(total), summary=summary, live=live, buckets=buckets,
+        by_hour={r["hour"]: r["n"] for r in by_hour},
+        crossed_only=crossed_only, min_minutes=min_minutes)
+
+
+@app.route("/window/<int:window_id>")
+@login_required
+def window_detail(window_id):
+    win = one("SELECT * FROM edge_windows WHERE id = ?", (window_id,))
+    if win is None:
+        abort(404)
+
+    ticks = rows("SELECT * FROM edge_ticks WHERE window_id = ? ORDER BY ts_ms",
+                 (window_id,))
+    others = rows("""
+        SELECT * FROM edge_windows
+        WHERE event_slug = ? AND id != ? AND closed_at IS NOT NULL
+        ORDER BY opened_at DESC LIMIT 15
+    """, (win["event_slug"], window_id))
+
+    return render_template("window_detail.html", win=win, ticks=ticks,
+                           others=others)
+
+
+# =====================================================================
+# Edge distribution — where the threshold actually sits
+# =====================================================================
+
+
+# Candidate thresholds, coarsest first. Shown against the real
+# distribution so "we found nothing" becomes a statement about where the
+# line is drawn rather than about whether the pipeline works.
+THRESHOLDS = [0.010, 0.005, 0.003, 0.002, 0.001, 0.0005, 0.0]
+
+
+@app.route("/distribution")
+@login_required
+def distribution():
+    if not table_exists("event_verdicts"):
+        return render_template("no_verdicts.html")
+
+    scans = request.args.get("scans", 20, type=int)
+    scope = ("scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)",
+             [scans])
+
+    edges = [r["net_edge"] for r in rows(
+        f"SELECT net_edge FROM event_verdicts "
+        f"WHERE net_edge IS NOT NULL AND {scope[0]} ORDER BY net_edge",
+        scope[1])]
+
+    sensitivity = [
+        {"threshold": t, "n": sum(1 for e in edges if e >= t)}
+        for t in THRESHOLDS
+    ]
+
+    # 30 equal buckets over the observed range; the interesting mass is
+    # always near zero, so the axis is left as-is rather than log-scaled.
+    hist = []
+    if edges:
+        lo, hi = edges[0], edges[-1]
+        span = (hi - lo) or 1e-9
+        nbuckets = 30
+        counts = [0] * nbuckets
+        for e in edges:
+            idx = min(int((e - lo) / span * nbuckets), nbuckets - 1)
+            counts[idx] += 1
+        hist = [{"lo": lo + i * span / nbuckets,
+                 "hi": lo + (i + 1) * span / nbuckets,
+                 "n": c} for i, c in enumerate(counts)]
+
+    windows_best = None
+    if table_exists("edge_windows"):
+        windows_best = one("SELECT MAX(best_edge) b FROM edge_windows")["b"]
+
+    return render_template(
+        "distribution.html", edges=edges, hist=hist,
+        sensitivity=sensitivity, scans=scans,
+        current=config.MIN_NET_EDGE,
+        near_miss_floor=config.NEAR_MISS_MIN_NET,
+        windows_best=windows_best,
+        best=edges[-1] if edges else None,
+        median=edges[len(edges) // 2] if edges else None)
 
 
 # =====================================================================
@@ -550,6 +716,48 @@ def funnel():
         order=["prefilter", "book", "basket", "edge"])
 
 
+@app.route("/fees")
+@login_required
+def fees_view():
+    """
+    Which fee categories actually produce edges.
+
+    The rate runs from 0% on geopolitics to 7% on crypto, so the same
+    gross edge is a trade in one category and a loss in another. Without
+    this, an analyst has to hold the fee table in their head while reading
+    every other page.
+    """
+    scans = request.args.get("scans", 20, type=int)
+
+    if not table_exists("event_verdicts"):
+        return render_template("no_verdicts.html")
+
+    by_fee = rows("""
+        SELECT fee_rate,
+               COUNT(*) analysed,
+               SUM(outcome = 'near_miss') near_misses,
+               SUM(outcome = 'opportunity') opportunities,
+               AVG(net_edge) avg_edge,
+               MAX(net_edge) best_edge,
+               AVG(gross_edge) avg_gross
+        FROM event_verdicts
+        WHERE fee_rate IS NOT NULL
+          AND scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
+        GROUP BY fee_rate ORDER BY fee_rate
+    """, (scans,))
+
+    by_category = rows("""
+        SELECT COALESCE(fee_category, category, 'نامشخص') cat,
+               fee_rate, COUNT(*) n, MAX(net_edge) best_edge
+        FROM event_verdicts
+        WHERE scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
+        GROUP BY cat, fee_rate ORDER BY n DESC LIMIT 25
+    """, (scans,))
+
+    return render_template("fees.html", by_fee=by_fee,
+                           by_category=by_category, scans=scans)
+
+
 # =====================================================================
 # System
 # =====================================================================
@@ -575,7 +783,8 @@ def system():
 @app.route("/glossary")
 @login_required
 def glossary_page():
-    return render_template("glossary.html", reasons=glossary.REASONS,
+    return render_template("glossary.html", terms=glossary.TERMS,
+                           reasons=glossary.REASONS,
                            suspicions=glossary.SUSPICIONS,
                            stages=glossary.STAGES)
 
@@ -651,31 +860,88 @@ def _verdict_count():
 # =====================================================================
 
 
+def _prompt_password() -> str:
+    pw = getpass.getpass("رمز عبور: ")
+    if len(pw) < 10:
+        raise SystemExit("رمز باید دست‌کم ۱۰ کاراکتر باشد.")
+    if pw != getpass.getpass("تکرار رمز عبور: "):
+        raise SystemExit("رمزها یکسان نیستند.")
+    return pw
+
+
 def main():
     parser = argparse.ArgumentParser(description="Polymarket arb dashboard")
+    parser.add_argument("--add-user", metavar="USERNAME",
+                        help="create an analyst account")
+    parser.add_argument("--name", metavar="DISPLAY_NAME",
+                        help="full name, shown in the login record")
+    parser.add_argument("--reset-password", metavar="USERNAME")
+    parser.add_argument("--disable-user", metavar="USERNAME")
+    parser.add_argument("--enable-user", metavar="USERNAME")
+    parser.add_argument("--list-users", action="store_true")
+    parser.add_argument("--logins", type=int, nargs="?", const=30,
+                        metavar="N", help="print the last N login attempts")
     parser.add_argument("--hash-password", action="store_true",
-                        help="prompt for a password and print its hash")
+                        help="print a hash for polly.env (pre-accounts style)")
     parser.add_argument("--host", default=DASH_HOST)
     parser.add_argument("--port", type=int, default=DASH_PORT)
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     if args.hash_password:
-        pw = getpass.getpass("رمز عبور: ")
-        again = getpass.getpass("تکرار رمز عبور: ")
-        if pw != again:
-            raise SystemExit("رمزها یکسان نیستند.")
-        if len(pw) < 10:
-            raise SystemExit("رمز باید دست‌کم ۱۰ کاراکتر باشد.")
+        pw = _prompt_password()
         print("\nاین دو خط را در /etc/polly/polly.env بگذارید:\n")
         print(f"POLLY_DASH_PASSWORD_HASH={hash_password(pw)}")
         print(f"POLLY_DASH_SECRET_KEY={secrets.token_hex(32)}")
         return
 
-    if not DASH_USER or not DASH_PASSWORD_HASH:
-        print("[dashboard] WARNING: POLLY_DASH_USER / "
-              "POLLY_DASH_PASSWORD_HASH are unset; login is disabled and "
-              "every page will refuse. Run --hash-password first.")
+    account_flags = (args.add_user or args.reset_password or
+                     args.disable_user or args.enable_user or
+                     args.list_users or args.logins is not None)
+
+    if account_flags:
+        conn = dashauth.connect(AUTH_DB_PATH)
+
+        if args.add_user:
+            if dashauth.get_user(conn, args.add_user):
+                raise SystemExit(f"حساب {args.add_user!r} از قبل وجود دارد.")
+            dashauth.add_user(conn, args.add_user, _prompt_password(),
+                              args.name)
+            print(f"✓ حساب {args.add_user!r} ساخته شد.")
+
+        elif args.reset_password:
+            if not dashauth.set_password(conn, args.reset_password,
+                                         _prompt_password()):
+                raise SystemExit(f"حساب {args.reset_password!r} پیدا نشد.")
+            print(f"✓ رمز {args.reset_password!r} عوض شد.")
+
+        elif args.disable_user or args.enable_user:
+            name = args.disable_user or args.enable_user
+            if not dashauth.set_disabled(conn, name, bool(args.disable_user)):
+                raise SystemExit(f"حساب {name!r} پیدا نشد.")
+            print(f"✓ {name!r} {'غیرفعال' if args.disable_user else 'فعال'} شد.")
+
+        elif args.list_users:
+            users = dashauth.list_users(conn)
+            if not users:
+                print("هیچ حسابی ساخته نشده. با --add-user بسازید.")
+            print(f"{'کاربر':<18} {'نام':<24} {'وضعیت':<10} "
+                  f"{'ورودها':>7}  آخرین ورود")
+            for u in users:
+                state = "غیرفعال" if u["disabled_at"] else "فعال"
+                print(f"{u['username']:<18} {(u['display_name'] or '—'):<24} "
+                      f"{state:<10} {u['logins']:>7}  "
+                      f"{u['last_login_at'] or '—'}")
+
+        elif args.logins is not None:
+            for r in dashauth.recent_logins(conn, args.logins):
+                mark = "✓" if r["success"] else "✗"
+                print(f"{mark} {r['at']}  {(r['username'] or '?'):<16} "
+                      f"{(r['ip'] or '?'):<18} {r['reason'] or ''}")
+
+        conn.close()
+        return
+
     if not SECRET_KEY:
         print("[dashboard] WARNING: POLLY_DASH_SECRET_KEY is unset; a random "
               "key was generated, so sessions will not survive a restart.")

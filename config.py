@@ -214,6 +214,35 @@ STALE_BOOK_SEC = _value("STALE_BOOK_SEC", 300, int)
 
 
 # =====================================================================
+# Edge recording — the shape of an edge, not just its threshold crossing
+# =====================================================================
+# The engine evaluates the edge on every book update and used to keep only
+# what beat LIVE_MIN_EDGE. The episodes worth studying are mostly the ones
+# that never got there: a market that dips for ten minutes and recovers
+# leaves no trace in either signals or the 15-minute scan.
+
+LIVE_RECORD = _env("LIVE_RECORD", True, bool)
+
+# The watch band. Deliberately far below LIVE_MIN_EDGE (0.003) so a window
+# that came close is recorded too — "how near did we get, and for how
+# long" is the question this data exists to answer.
+LIVE_RECORD_MIN_EDGE = _value("LIVE_RECORD_MIN_EDGE", -0.02)
+
+# One tick per event per interval. A busy book updates several times a
+# second; at this resolution the shape of a ten-minute dip survives intact
+# while the row count stays in the tens of thousands per day.
+LIVE_TICK_MIN_INTERVAL_MS = _value("LIVE_TICK_MIN_INTERVAL_MS", 1000, int)
+
+# Ticks are the zoomed-in view and age out. edge_windows — one row per
+# episode — is the permanent record and is never pruned.
+TICK_RETENTION_DAYS = _value("TICK_RETENTION_DAYS", 7, int)
+
+# A window must last at least this long to be kept. A single stray
+# evaluation is noise, not an episode.
+MIN_WINDOW_MS = _value("MIN_WINDOW_MS", 2000, int)
+
+
+# =====================================================================
 # Executor — risk limits
 # =====================================================================
 
@@ -245,6 +274,27 @@ VERDICT_RETENTION_SCANS = _value("VERDICT_RETENTION_SCANS", 96, int)
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 LOG_FORMAT = os.getenv("LOG_FORMAT", "text").lower()  # "text" | "json"
 LOG_FILE = os.getenv("LOG_FILE", "")
+
+
+# =====================================================================
+# Alerts
+# =====================================================================
+# Opportunities are rare and brief. Without a push, the dashboard becomes
+# a record of what was missed rather than a way to catch anything.
+# Unconfigured, notify.py is a no-op and can be called unconditionally.
+
+ALERT_TELEGRAM_TOKEN = os.getenv("ALERT_TELEGRAM_TOKEN", "")
+ALERT_TELEGRAM_CHAT_ID = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+
+# Above MIN_NET_EDGE on purpose: the bar to interrupt a person is higher
+# than the bar to write a row.
+ALERT_MIN_EDGE = _value("ALERT_MIN_EDGE", 0.005)
+
+# One alert per event per cooldown. A market sitting on the threshold can
+# cross it dozens of times a minute, and an alert per crossing teaches
+# people to mute the channel.
+ALERT_COOLDOWN_SEC = _value("ALERT_COOLDOWN_SEC", 900, int)
+ALERT_TIMEOUT = _value("ALERT_TIMEOUT", 8.0)
 
 
 # =====================================================================

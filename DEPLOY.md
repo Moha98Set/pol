@@ -197,6 +197,76 @@ of it, or set `POLLY_DASH_HOST=127.0.0.1` and reach it through a tunnel:
 ssh -L 8971:127.0.0.1:8971 root@<server>
 ```
 
+### Analyst accounts
+
+Each analyst gets their own login, because a login record that says
+`analyst` every time answers nothing about who is using the tool.
+
+```bash
+sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --add-user sara --name "Sara M"
+sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --list-users
+sudo -u polly /opt/polly/venv/bin/python /opt/polly/dashboard.py --logins 50
+```
+
+Accounts live in `/var/lib/polly/dashboard.db`, separate from the market
+data, so the market database can be copied to a laptop without carrying
+password hashes with it. `--disable-user` revokes access without deleting
+the person's login history.
+
+Every attempt is recorded — who, from where, and why it was refused. The
+record is written but not shown in the UI.
+
+Failures are counted per (username, address) pair, deliberately. With all
+the analysts behind one office address, a per-IP lockout would let one
+person's typo stop the whole team; a per-user lockout would let anyone who
+knows a colleague's username lock them out. A separate, higher ceiling per
+address still stops someone rotating through usernames.
+
+The older single-login keys in `polly.env` are still read: on first start
+they are imported as the first account, so upgrading does not lock anyone
+out.
+
+### Short-lived windows
+
+`arb_monitor` scans every 15 minutes, so an edge that exists for ten
+minutes can fall entirely between two scans. The live engine already
+evaluated the edge on every book update and discarded everything below the
+execute threshold — which is exactly where those episodes live.
+
+It now keeps them:
+
+| Table | Holds | Kept |
+|---|---|---|
+| `edge_windows` | one row per episode: when, how long, how deep | forever |
+| `edge_ticks` | the shape inside an episode | `TICK_RETENTION_DAYS` |
+
+The Windows tab ranks episodes and summarises how long they last and what
+hour of day they happen — the two questions that decide whether they are
+reachable at all. `LIVE_RECORD_MIN_EDGE` sets how near an edge must come
+to be worth recording; it is far below the execute threshold on purpose.
+
+The real limit is coverage, not storage: `LIVE_TOP_N` streams 40 of some
+2100 markets, so a window in any of the others is never seen. Raise it
+with an eye on `MAX_TOKENS_PER_SOCKET`.
+
+### Alerts
+
+Opportunities are rare and brief, so the dashboard pushes rather than
+waits. Set `ALERT_TELEGRAM_TOKEN` and `ALERT_TELEGRAM_CHAT_ID` in
+`polly.env`; unset, the whole path is a no-op.
+
+```bash
+sudo -u polly bash -c 'set -a; . /etc/polly/polly.env; set +a; \
+    /opt/polly/venv/bin/python /opt/polly/notify.py'
+```
+
+Alerts fire when an opportunity is stored and when a live window crosses
+the execute threshold — the latter while the window is still open, since
+an alert about a closed window describes something already gone. One alert
+per market per `ALERT_COOLDOWN_SEC`, because a market sitting on the
+threshold crosses it repeatedly and an alert each time teaches people to
+mute the channel. A failed alert is logged and never interrupts a scan.
+
 ### Where the market-by-market data comes from
 
 The `rejections` table only ever counted reasons, never which markets they

@@ -236,6 +236,75 @@ CREATE TABLE IF NOT EXISTS event_verdicts (
 
     FOREIGN KEY (scan_id) REFERENCES scans(id)
 );
+-- An edge's shape over time, not just the moment it crossed a threshold.
+--
+-- live_engine already recomputes the edge on every book update — 113
+-- evaluations a minute in a quiet market — and discarded all of it unless
+-- it beat LIVE_MIN_EDGE. The windows analysts care about are exactly the
+-- ones that never got there: a market opens, dips for ten minutes, and
+-- closes again, entirely between two 15-minute scans.
+--
+-- edge_windows is one row per episode, which is the unit worth analysing:
+-- how long these last, how deep they go, when in the day they happen.
+-- edge_ticks is the shape inside one episode, for zooming in. Ticks are
+-- rate-limited per event and pruned; windows are small and kept.
+CREATE TABLE IF NOT EXISTS edge_windows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_slug TEXT NOT NULL,
+    event_title TEXT,
+    side TEXT,                          -- 'yes' | 'no'
+    num_outcomes INTEGER,
+    fee_rate REAL,
+    payout REAL,                        -- 1 for YES, N-1 for NO
+
+    opened_at TEXT NOT NULL,
+    closed_at TEXT,                     -- NULL while still open
+    duration_ms INTEGER,
+    ticks INTEGER DEFAULT 0,
+
+    opened_edge REAL,
+    best_edge REAL,                     -- highest edge reached
+    best_sum_asks REAL,                 -- and the basket price there
+    best_at TEXT,
+    closed_edge REAL,
+
+    -- The most this window was ever worth in dollars, which is the number
+    -- that decides whether it was an opportunity or a curiosity.
+    best_capital REAL,                  -- absorbed, not requested
+    best_profit REAL,
+
+    -- 1 if it ever beat LIVE_MIN_EDGE, i.e. became a real signal rather
+    -- than only a near approach
+    crossed INTEGER DEFAULT 0,
+    url TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_win_slug ON edge_windows(event_slug);
+CREATE INDEX IF NOT EXISTS idx_win_opened ON edge_windows(opened_at);
+CREATE INDEX IF NOT EXISTS idx_win_best ON edge_windows(best_edge);
+CREATE INDEX IF NOT EXISTS idx_win_open ON edge_windows(closed_at);
+
+CREATE TABLE IF NOT EXISTS edge_ticks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    window_id INTEGER NOT NULL,
+    ts_ms INTEGER NOT NULL,             -- epoch ms: cheap range scans
+    recorded_at TEXT NOT NULL,
+    sum_best_asks REAL,
+    net_edge REAL,
+    comparable_edge REAL,               -- per dollar of capital
+
+    -- Price alone cannot tell a real window from a decorative one. An
+    -- edge that lasted ten minutes but was never fillable for more than
+    -- five dollars looks identical on a price chart to one worth taking,
+    -- and dry_leg is already the single biggest rejection reason after
+    -- the pre-filter. These are what separate the two.
+    fillable_capital REAL,              -- what the book actually absorbed
+    fillable_profit REAL,               -- what it would have returned
+
+    FOREIGN KEY (window_id) REFERENCES edge_windows(id)
+);
+CREATE INDEX IF NOT EXISTS idx_tick_window ON edge_ticks(window_id, ts_ms);
+CREATE INDEX IF NOT EXISTS idx_tick_ts ON edge_ticks(ts_ms);
+
 CREATE INDEX IF NOT EXISTS idx_verdict_scan ON event_verdicts(scan_id);
 CREATE INDEX IF NOT EXISTS idx_verdict_code ON event_verdicts(code);
 CREATE INDEX IF NOT EXISTS idx_verdict_outcome ON event_verdicts(outcome);
@@ -440,6 +509,111 @@ def prune_event_verdicts(db: sqlite3.Connection, keep_scans: int) -> int:
 
     cur = db.execute("DELETE FROM event_verdicts WHERE scan_id < ?",
                      (row["scan_id"],))
+    db.commit()
+    return cur.rowcount
+
+
+# ====================================================================
+# Edge windows — an episode and its shape
+# ====================================================================
+
+
+def open_edge_window(db: sqlite3.Connection, w: dict) -> int:
+    cur = db.execute("""
+        INSERT INTO edge_windows (
+            event_slug, event_title, side, num_outcomes, fee_rate, payout,
+            opened_at, opened_edge, best_edge, best_sum_asks, best_at,
+            best_capital, best_profit, crossed, url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        w["event_slug"], w.get("event_title"), w.get("side"),
+        w.get("num_outcomes"), w.get("fee_rate"), w.get("payout"),
+        w["opened_at"], w.get("edge"), w.get("edge"),
+        w.get("sum_best_asks"), w["opened_at"],
+        w.get("fillable_capital"), w.get("fillable_profit"),
+        int(bool(w.get("crossed"))), w.get("url"),
+    ))
+    db.commit()
+    return cur.lastrowid
+
+
+def update_edge_window(db: sqlite3.Connection, window_id: int, w: dict):
+    """Extend an open window with a new best, if this tick beat the old one."""
+    db.execute("""
+        UPDATE edge_windows SET
+            ticks = ?,
+            best_edge = ?,
+            best_sum_asks = ?,
+            best_at = ?,
+            best_capital = ?,
+            best_profit = ?,
+            crossed = MAX(crossed, ?)
+        WHERE id = ?
+    """, (w["ticks"], w["best_edge"], w["best_sum_asks"], w["best_at"],
+          w.get("best_capital"), w.get("best_profit"),
+          int(bool(w.get("crossed"))), window_id))
+    db.commit()
+
+
+def close_edge_window(db: sqlite3.Connection, window_id: int, *,
+                      closed_at: str, duration_ms: int, closed_edge: float,
+                      ticks: int):
+    db.execute("""
+        UPDATE edge_windows
+        SET closed_at = ?, duration_ms = ?, closed_edge = ?, ticks = ?
+        WHERE id = ?
+    """, (closed_at, duration_ms, closed_edge, ticks, window_id))
+    db.commit()
+
+
+def save_edge_ticks(db: sqlite3.Connection, rows: list):
+    """
+    Append a batch of ticks.
+
+    Batched by the caller rather than written per update: a busy market can
+    produce several evaluations a second, and one commit each would put
+    fsync on the hot path of a WebSocket handler.
+    """
+    if not rows:
+        return
+    db.executemany("""
+        INSERT INTO edge_ticks (
+            window_id, ts_ms, recorded_at, sum_best_asks, net_edge,
+            comparable_edge, fillable_capital, fillable_profit
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, [(r["window_id"], r["ts_ms"], r["recorded_at"], r["sum_best_asks"],
+           r["net_edge"], r["comparable_edge"], r.get("fillable_capital"),
+           r.get("fillable_profit")) for r in rows])
+    db.commit()
+
+
+def close_orphan_windows(db: sqlite3.Connection) -> int:
+    """
+    Close windows a previous run left open.
+
+    The engine is killed mid-window every time it restarts, so without this
+    an old row stays open forever and every query for "currently open"
+    returns something that ended days ago.
+    """
+    cur = db.execute("""
+        UPDATE edge_windows
+        SET closed_at = opened_at, duration_ms = 0, closed_edge = opened_edge
+        WHERE closed_at IS NULL
+    """)
+    db.commit()
+    return cur.rowcount
+
+
+def prune_edge_ticks(db: sqlite3.Connection, keep_days: int) -> int:
+    """
+    Drop tick rows older than `keep_days`. Windows are never pruned here —
+    they are small, and they are the record worth keeping.
+    """
+    if keep_days <= 0:
+        return 0
+    cutoff = int((datetime.now(timezone.utc).timestamp() - keep_days * 86400)
+                 * 1000)
+    cur = db.execute("DELETE FROM edge_ticks WHERE ts_ms < ?", (cutoff,))
     db.commit()
     return cur.rowcount
 
