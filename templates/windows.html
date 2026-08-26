@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_sort.html" as sortui %}
 {% block title %}پنجره‌ها — داشبورد آربیتراژ{% endblock %}
 {% block body %}
 
@@ -15,9 +16,9 @@
     <div class="v num {{ 'good' if summary.crossed else '' }}">{{ summary.crossed or 0 }}</div>
     <div class="note">بقیه فقط نزدیک شدند</div></div>
   <div class="card"><div class="k">میانگین طول</div>
-    <div class="v num">{% if summary.avg_ms %}{{ (summary.avg_ms / 60000)|fa_num(1) }}<span style="font-size:14px"> دقیقه</span>{% else %}—{% endif %}</div></div>
+    <div class="v num">{{ summary.avg_ms|duration }}</div></div>
   <div class="card"><div class="k">طولانی‌ترین</div>
-    <div class="v num">{% if summary.max_ms %}{{ (summary.max_ms / 60000)|fa_num(1) }}<span style="font-size:14px"> دقیقه</span>{% else %}—{% endif %}</div></div>
+    <div class="v num">{{ summary.max_ms|duration }}</div></div>
   <div class="card"><div class="k">بهترین لبه‌ی دیده‌شده</div>
     <div class="v num {{ 'good' if summary.best and summary.best > 0 else '' }}">{{ summary.best|pct(3) }}</div></div>
   <div class="card"><div class="k">هم‌اکنون باز</div>
@@ -73,22 +74,25 @@
       <option value="1" {{ 'selected' if crossed_only }}>فقط آن‌هایی که سیگنال شدند</option>
     </select>
   </div>
-  <div class="field">
-    <label for="min_minutes">حداقل طول (دقیقه)</label>
-    <input id="min_minutes" name="min_minutes" type="number" step="0.5" min="0"
-           value="{{ min_minutes or '' }}">
-  </div>
   <button type="submit">اعمال</button>
   <a class="btn ghost" href="{{ request.path }}">پاک کردن</a>
 </form>
+
+{{ sortui.ranges(sortstate) }}
 
 <div class="panel">
   <h2>{{ '{:,}'.format(total) }} پنجره</h2>
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>بازار</th><th>سمت</th><th>باز شد</th><th>طول</th>
-        <th>بهترین لبه</th><th>کف قیمت</th><th>قابل جذب</th><th>سود</th><th>سیگنال شد؟</th>
+        <th>بازار</th><th>سمت</th>
+        {{ sortui.th('opened_at',     'باز شد',      sortstate, 'right') }}
+        {{ sortui.th('duration_ms',   'طول',         sortstate) }}
+        {{ sortui.th('best_edge',     'بهترین لبه',  sortstate) }}
+        {{ sortui.th('best_sum_asks', 'کف قیمت',     sortstate) }}
+        {{ sortui.th('best_capital',  'قابل جذب',    sortstate) }}
+        {{ sortui.th('best_profit',   'سود',         sortstate) }}
+        <th>سیگنال شد؟</th>
       </tr></thead>
       <tbody>
         {% for w in items %}
@@ -96,7 +100,7 @@
           <td class="wrap"><a href="{{ url_for('window_detail', window_id=w.id) }}">{{ w.event_title or w.event_slug }}</a></td>
           <td>{{ 'بله' if w.side == 'yes' else 'نه' }}</td>
           <td title="{{ w.opened_at }}">{{ w.opened_at|ago }}</td>
-          <td class="num">{{ (w.duration_ms / 60000)|fa_num(1) }} دقیقه</td>
+          <td class="num">{{ w.duration_ms|duration }}</td>
           <td class="num {{ 'good' if w.best_edge and w.best_edge > 0 else '' }}">{{ w.best_edge|pct(3) }}</td>
           <td class="num">{{ w.best_sum_asks|fa_num(4) }}</td>
           <td class="num {{ 'bad' if w.best_capital is not none and w.best_capital < 20 else '' }}">{{ w.best_capital|money(0) }}</td>

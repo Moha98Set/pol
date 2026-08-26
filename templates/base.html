@@ -162,6 +162,47 @@ button:hover,.btn:hover{opacity:.9; text-decoration:none}
 .bar-row .fill{height:100%; background:var(--accent); border-radius:5px}
 .bar-row .n{min-width:92px; color:var(--muted); font-size:13px; text-align:left}
 
+/* Sortable headers and the numeric range panel */
+th a.sortlink{color:var(--muted); display:inline-flex; gap:4px; align-items:center}
+th a.sortlink:hover{color:var(--text); text-decoration:none}
+th a.sortlink.on{color:var(--accent); font-weight:700}
+th .arrow{font-size:11px; width:9px; display:inline-block}
+
+details.rangebox{
+  background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  margin-bottom:18px; box-shadow:var(--shadow);
+}
+details.rangebox > summary{
+  padding:12px 17px; cursor:pointer; font-size:14px; color:var(--muted);
+  display:flex; align-items:center; gap:9px; user-select:none;
+}
+details.rangebox > summary:hover{color:var(--text)}
+details.rangebox[open] > summary{border-bottom:1px solid var(--border)}
+.rangeform{padding:16px 17px}
+.rangegrid{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px}
+.rangecol label{display:block; font-size:12px; color:var(--muted); margin-bottom:5px}
+.rangecol label .unit{opacity:.65}
+.rangecol .pair{display:flex; gap:6px}
+.rangecol .pair input{min-width:0; width:100%; padding:7px 9px; font-size:13px}
+.rangeactions{display:flex; gap:9px; margin-top:15px}
+.rangetabs{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:16px}
+.rangetabs a{
+  padding:6px 14px; border-radius:8px; font-size:13px; color:var(--muted);
+  background:var(--surface-2); border:1px solid var(--border);
+}
+.rangetabs a:hover{color:var(--text); text-decoration:none}
+.rangetabs a.on{background:var(--accent); color:#fff; border-color:transparent; font-weight:600}
+.axis{display:flex; justify-content:space-between; align-items:center;
+      color:var(--muted); font-size:12px; margin-top:8px; gap:12px; flex-wrap:wrap}
+
+.timerow{display:flex; gap:14px; flex-wrap:wrap}
+.timerow .rangecol{min-width:170px}
+.timerow select,.timerow input{width:100%}
+.rangesep{height:1px; background:var(--border); margin:16px 0}
+details.rangebox > summary .hint{color:var(--muted); font-size:12px; opacity:.75; margin-inline-start:auto}
+input[type=date]{background:var(--surface); color:var(--text); border:1px solid var(--border);
+  border-radius:8px; padding:7px 10px; font:inherit; font-size:13px}
+
 pre.logs{
   background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
   padding:14px; overflow-x:auto; font-size:12.5px; line-height:1.6;

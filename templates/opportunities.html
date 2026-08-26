@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_sort.html" as sortui %}
 {% block title %}فرصت‌ها — داشبورد آربیتراژ{% endblock %}
 {% block body %}
 
@@ -6,6 +7,16 @@
 <p class="sub">
   بازارهایی که همه‌ی بررسی‌ها را گذراندند و پس از کارمزد و اسلیپیج سود مثبت داشتند.
 </p>
+
+<div class="panel"><div class="body" style="line-height:1.95">
+  <strong>سرمایه</strong> یعنی چقدر می‌شود <em>در همان قیمتی که روی صفحه است</em> گذاشت —
+  محدود به نازک‌ترین سطح اولِ پاها، بدون هیچ اسلیپیجی. این عددی است که می‌شود به آن اتکا کرد،
+  چون سودش به این بستگی ندارد که دفتر سفارش هنگام پیمودنش ثابت بماند.
+  <br>
+  ستون <strong>با اسلیپیج</strong> همان چیزی است که قبلاً «سرمایه» بود: بزرگ‌ترین سرمایه‌ای که
+  سود را بیشینه می‌کند، ولی برای رسیدن به آن باید در دفتر پایین‌تر رفت و گران‌تر خرید.
+  معمولاً چند برابر سرمایه می‌خواهد برای کسری بیشتر سود.
+</div></div>
 
 {% if total == 0 %}
 <div class="panel"><div class="empty">
@@ -18,12 +29,21 @@
   </div>
 </div></div>
 {% else %}
+{{ sortui.ranges(sortstate) }}
 <div class="panel">
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>بازار</th><th>نوع</th><th>گزینه</th><th>مجموع قیمت</th>
-        <th>لبه‌ی خالص</th><th>کارمزد</th><th>سود</th><th>سرمایه</th><th>بازده</th><th>زمان</th>
+        <th>بازار</th><th>نوع</th>
+        {{ sortui.th('num_outcomes',  'گزینه',      sortstate) }}
+        {{ sortui.th('sum_best_asks', 'مجموع قیمت', sortstate) }}
+        {{ sortui.th('net_edge',      'لبه‌ی خالص', sortstate) }}
+        {{ sortui.th('fee_rate',      'کارمزد',     sortstate) }}
+        {{ sortui.th('top_capital',   'سرمایه',     sortstate) }}
+        {{ sortui.th('top_profit',    'سود',        sortstate) }}
+        {{ sortui.th('best_capital',  'با اسلیپیج', sortstate) }}
+        {{ sortui.th('best_roi_pct',  'بازده',      sortstate) }}
+        <th>زمان</th>
       </tr></thead>
       <tbody>
         {% for r in items %}
@@ -34,8 +54,11 @@
           <td class="num">{{ r.sum_best_asks|fa_num(4) }}</td>
           <td class="num good">{{ r.net_edge|pct(3) }}</td>
           <td class="num">{{ r.fee_rate|pct(1) }}</td>
-          <td class="num good">{{ r.best_profit|money(2) }}</td>
-          <td class="num">{{ r.best_capital|money }}</td>
+          <td class="num">{{ r.top_capital|money(0) }}
+            {%- if r.top_shares %}<br><span style="font-size:11px;color:var(--muted)">{{ r.top_shares|fa_num(0) }} سهم</span>{% endif %}</td>
+          <td class="num {{ 'good' if r.top_profit and r.top_profit > 0 else '' }}">{{ r.top_profit|money(2) }}</td>
+          <td class="num" style="color:var(--muted)" title="با پیمودن دفتر سفارش تا عمق بیشتر">
+            {{ r.best_capital|money }} <span style="font-size:11px">/ {{ r.best_profit|money(2) }}</span></td>
           <td class="num">{{ r.best_roi_pct|fa_num(2) }}٪</td>
           <td title="{{ r.found_at }}">{{ r.found_at|ago }}</td>
         </tr>

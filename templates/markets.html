@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_sort.html" as sortui %}
 {% block title %}{{ title }} — داشبورد آربیتراژ{% endblock %}
 {% block body %}
 
@@ -64,6 +65,8 @@
   <a class="btn ghost" href="{{ request.path }}">پاک کردن</a>
 </form>
 
+{{ sortui.ranges(sortstate) }}
+
 {% if breakdown %}
 <div class="panel">
   <h2>تفکیک دلایل در این نما</h2>
@@ -86,7 +89,11 @@
     <table>
       <thead><tr>
         <th>بازار</th><th>نتیجه</th><th>دلیل</th><th>مرحله</th>
-        <th>گزینه</th><th>مجموع قیمت</th><th>لبه‌ی خالص</th><th>کارمزد</th><th>حجم ۲۴س</th>
+        {{ sortui.th('num_outcomes',  'گزینه',       sortstate) }}
+        {{ sortui.th('sum_best_asks', 'مجموع قیمت',  sortstate) }}
+        {{ sortui.th('net_edge',      'لبه‌ی خالص',  sortstate) }}
+        {{ sortui.th('fee_rate',      'کارمزد',      sortstate) }}
+        {{ sortui.th('volume_24h',    'حجم ۲۴س',     sortstate) }}
       </tr></thead>
       <tbody>
         {% for r in items %}

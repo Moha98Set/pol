@@ -308,3 +308,83 @@ def test_evaluate_is_stable_on_a_many_legged_event():
     assert result["num_legs"] == 20
     assert result["sum_best_asks"] == pytest.approx(0.90)
     assert result["best"]["profit"] > 0
+
+
+# =====================================================================
+# Top of book — what fits at the quoted price
+# =====================================================================
+
+
+def test_top_of_book_is_limited_by_the_thinnest_leg():
+    """
+    A basket needs the same number of shares of every leg, so the size
+    available without slippage is the smallest top level among them — not
+    the average, and not the largest.
+    """
+    legs = [("A", [(0.48, 500), (0.49, 9000)]),
+            ("B", [(0.49, 120), (0.50, 9000)])]
+
+    top = arbmath.top_of_book(legs, 1.0, 0.0)
+
+    assert top["shares"] == 120
+    assert top["sum_best_asks"] == pytest.approx(0.97)
+    assert top["capital"] == pytest.approx(120 * 0.97)
+
+
+def test_top_of_book_profit_uses_the_quoted_prices_only():
+    legs = [("A", [(0.40, 100), (0.45, 900)]),
+            ("B", [(0.55, 100), (0.60, 900)])]
+
+    top = arbmath.top_of_book(legs, 1.0, 0.0)
+
+    # 100 shares of a 0.95 basket paying 1.00, no fee
+    assert top["profit"] == pytest.approx(100 * 0.05)
+
+
+def test_top_of_book_charges_the_fee():
+    legs = [("A", [(0.40, 100)]), ("B", [(0.55, 100)])]
+
+    free = arbmath.top_of_book(legs, 1.0, 0.0)["profit"]
+    charged = arbmath.top_of_book(legs, 1.0, 0.05)["profit"]
+
+    assert charged < free
+
+
+def test_top_of_book_uses_the_payout_it_is_given():
+    """
+    A NO basket over N outcomes pays N-1. Assuming 1 would report every
+    one of them as a catastrophic loss.
+    """
+    # three legs at 0.60 — the basket costs 1.80
+    legs = [("A", [(0.6, 50)]), ("B", [(0.6, 50)]), ("C", [(0.6, 50)])]
+
+    as_yes = arbmath.top_of_book(legs, 1.0, 0.0)
+    as_no = arbmath.top_of_book(legs, 2.0, 0.0)
+
+    assert as_yes["profit"] < 0          # 1.80 to return 1.00 — a loss
+    assert as_no["profit"] > 0           # 1.80 to return 2.00 — a trade
+    assert as_no["profit"] == pytest.approx(50 * 0.2)
+
+
+def test_a_dry_leg_makes_the_top_of_book_empty_rather_than_raising():
+    legs = [("A", [(0.4, 100)]), ("B", [])]
+
+    top = arbmath.top_of_book(legs, 1.0, 0.0)
+
+    assert top["shares"] == 0
+    assert top["capital"] == 0
+    assert top["sum_best_asks"] is None
+
+
+def test_top_of_book_never_exceeds_what_the_curve_deploys():
+    """
+    The curve is free to walk deeper and deploy more; the top of book is a
+    floor under it, never above.
+    """
+    legs = [("A", [(0.40, 50), (0.44, 5000)]),
+            ("B", [(0.55, 50), (0.56, 5000)])]
+
+    top = arbmath.top_of_book(legs, 1.0, 0.02)
+    best = arbmath.evaluate_basket(legs, 0.02, [10, 100, 1000, 5000])["best"]
+
+    assert top["shares"] <= best["shares"]

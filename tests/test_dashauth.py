@@ -242,3 +242,190 @@ def test_a_missing_parent_directory_is_named(tmp_path):
     with pytest.raises(SystemExit) as excinfo:
         dashboard._check_auth_db_usable(tmp_path / "absent" / "dashboard.db")
     assert "absent" in str(excinfo.value)
+
+
+# =====================================================================
+# Sorting and range filters
+# =====================================================================
+
+
+def _ctx(query=""):
+    import dashboard
+    return dashboard.app.test_request_context(f"/x?{query}")
+
+
+def test_only_declared_columns_can_reach_the_order_by():
+    """
+    The sort column names a SQL expression, so anything the request can
+    put there must be checked against a list rather than trusted.
+    """
+    import dashboard
+    cols = {"net_edge": dashboard.Col("net_edge", "لبه")}
+    with _ctx("sort=net_edge%3B+DROP+TABLE+scans"):
+        order_by, _c, _p, state = dashboard.sort_and_filter(cols, "net_edge")
+    assert "DROP" not in order_by
+    assert state["sort"] == "net_edge"
+
+
+def test_an_unknown_sort_column_falls_back_to_the_default():
+    import dashboard
+    cols = {"a": dashboard.Col("a", "A"), "b": dashboard.Col("b", "B")}
+    with _ctx("sort=nonsense"):
+        _o, _c, _p, state = dashboard.sort_and_filter(cols, "b")
+    assert state["sort"] == "b"
+
+
+def test_nulls_sort_last_in_both_directions():
+    """A row with no edge is not the best edge, nor the worst — it is absent."""
+    import dashboard
+    cols = {"net_edge": dashboard.Col("net_edge", "لبه")}
+    for direction in ("asc", "desc"):
+        with _ctx(f"sort=net_edge&dir={direction}"):
+            order_by, *_ = dashboard.sort_and_filter(cols, "net_edge")
+        assert order_by.startswith("(net_edge IS NULL)")
+
+
+def test_a_percentage_bound_is_read_in_the_unit_the_column_shows():
+    """
+    Edges are stored as 0.004 and displayed as 0.400%. Typing 0.4 into the
+    box has to mean 0.4%, not 40% — otherwise the filter quietly does
+    something a hundred times larger than it appears to.
+    """
+    import dashboard
+    cols = {"net_edge": dashboard.Col("net_edge", "لبه", "percent", 0.01)}
+    with _ctx("min_net_edge=0.4"):
+        _o, clauses, params, _s = dashboard.sort_and_filter(cols, "net_edge")
+    assert clauses == ["net_edge >= ?"]
+    assert params[0] == pytest.approx(0.004)
+
+
+def test_a_duration_bound_is_read_in_minutes():
+    import dashboard
+    cols = {"duration_ms": dashboard.Col("duration_ms", "طول", "duration",
+                                         60_000)}
+    with _ctx("min_duration_ms=2.5"):
+        _o, _c, params, _s = dashboard.sort_and_filter(cols, "duration_ms")
+    assert params[0] == pytest.approx(150_000)
+
+
+def test_a_non_numeric_bound_is_ignored_rather_than_raising():
+    import dashboard
+    cols = {"volume_24h": dashboard.Col("volume_24h", "حجم")}
+    with _ctx("min_volume_24h=abc&max_volume_24h="):
+        _o, clauses, params, state = dashboard.sort_and_filter(
+            cols, "volume_24h")
+    assert clauses == [] and params == [] and state["bounds"] == {}
+
+
+def test_both_bounds_together_make_a_closed_range():
+    import dashboard
+    cols = {"volume_24h": dashboard.Col("volume_24h", "حجم")}
+    with _ctx("min_volume_24h=100&max_volume_24h=900"):
+        _o, clauses, params, _s = dashboard.sort_and_filter(cols, "volume_24h")
+    assert clauses == ["volume_24h >= ?", "volume_24h <= ?"]
+    assert params == [100.0, 900.0]
+
+
+def test_a_time_window_narrows_by_the_views_own_column():
+    import dashboard
+    cols = {"a": dashboard.Col("a", "A")}
+    with _ctx("since=6h"):
+        _o, clauses, params, state = dashboard.sort_and_filter(
+            cols, "a", time_col="opened_at")
+    assert clauses == ["opened_at >= ?"]
+    assert state["time"]["since"] == "6h"
+    # the cutoff is a real timestamp, comparable to what is stored
+    assert params[0].startswith("20")
+
+
+def test_a_default_time_window_applies_when_none_was_chosen():
+    import dashboard
+    cols = {"a": dashboard.Col("a", "A")}
+    with _ctx(""):
+        _o, clauses, _p, _s = dashboard.sort_and_filter(
+            cols, "a", time_col="found_at", default_since="24h")
+    assert clauses == ["found_at >= ?"]
+
+
+def test_choosing_all_time_overrides_the_default_window():
+    """An explicitly empty `since` must beat the default, not fall back to it."""
+    import dashboard
+    cols = {"a": dashboard.Col("a", "A")}
+    with _ctx("since="):
+        _o, clauses, _p, _s = dashboard.sort_and_filter(
+            cols, "a", time_col="found_at", default_since="24h")
+    assert clauses == []
+
+
+def test_a_to_date_covers_the_whole_day_it_names():
+    import dashboard
+    cols = {"a": dashboard.Col("a", "A")}
+    with _ctx("to=2026-08-25"):
+        _o, _c, params, _s = dashboard.sort_and_filter(
+            cols, "a", time_col="opened_at")
+    assert params[0].startswith("2026-08-25T23:59:59")
+
+
+@pytest.mark.parametrize("ms,expected", [
+    (None, "—"),
+    (420, "میلی‌ثانیه"),
+    (4_500, "ثانیه"),
+    (45_000, "ثانیه"),
+    (90_000, "دقیقه"),
+    (330_000, "دقیقه"),
+    (3_600_000, "ساعت"),
+    (90_000_000, "روز"),
+])
+def test_a_duration_is_shown_in_the_unit_that_suits_it(ms, expected):
+    """
+    Everything used to be minutes, which renders a four-second window as
+    0.1 and an hour-long one as 61.4.
+    """
+    import dashboard
+    assert expected in dashboard.duration(ms)
+
+
+def test_five_and_a_half_minutes_reads_as_minutes():
+    import dashboard
+    assert dashboard.duration(330_000) == "5.5 دقیقه"
+
+
+def test_an_hour_and_a_half_reads_as_hours():
+    import dashboard
+    assert dashboard.duration(5_400_000) == "1.5 ساعت"
+
+
+# =====================================================================
+# The overview trend range
+# =====================================================================
+
+
+def test_every_offered_range_has_a_bucket_and_a_window():
+    import dashboard
+    assert set(dashboard.TREND_RANGES) == {"6h", "12h", "1d", "7d", "30d"}
+    for key, (label, seconds, bucket) in dashboard.TREND_RANGES.items():
+        assert label and seconds > 0
+        assert "found_at" in bucket, key
+
+
+def test_longer_ranges_use_coarser_buckets():
+    """
+    Thirty days of 15-minute scans is ~2900 points against a 400px chart.
+    Each range has to aggregate enough to stay readable, so the bucket
+    must grow with the window rather than staying per-scan.
+    """
+    import dashboard
+    order = ["6h", "12h", "1d", "7d", "30d"]
+    seconds = [dashboard.TREND_RANGES[k][1] for k in order]
+    assert seconds == sorted(seconds)
+    # the coarsest bucket is a whole day, the finest is sub-hour
+    assert "%M" in dashboard.TREND_RANGES["6h"][2]
+    assert "%H" not in dashboard.TREND_RANGES["30d"][2]
+
+
+def test_an_unknown_range_falls_back_rather_than_reaching_sql():
+    import dashboard
+    with dashboard.app.test_request_context("/?range=1%3B+DROP+TABLE+scans"):
+        key = dashboard.request.args.get("range")
+        resolved = key if key in dashboard.TREND_RANGES else dashboard.TREND_DEFAULT
+    assert resolved == dashboard.TREND_DEFAULT

@@ -409,10 +409,14 @@ def scan_binary_event(group: dict, books: dict = None) -> tuple:
                 validate.reject(NO_FILLABLE_SIZE))
 
     best = max(curve, key=lambda x: x["profit"])
+    top = arbmath.top_of_book(legs, 1.0, fee_rate)
 
     return {
         "kind": "opportunity",
         "market_type": "binary",
+        "top_shares": top["shares"],
+        "top_capital": top["capital"],
+        "top_profit": top["profit"],
         "event_title": event.get("title"),
         "event_slug": event.get("slug"),
         "question": m.get("question"),
@@ -435,8 +439,12 @@ def scan_binary_event(group: dict, books: dict = None) -> tuple:
         # token_id is carried through so the executor can act on a stored
         # opportunity without re-resolving the event
         "legs_detail": [
-            {"outcome": "Yes", "best_ask": yes_best, "token_id": token_ids[0]},
-            {"outcome": "No", "best_ask": no_best, "token_id": token_ids[1]},
+            {"outcome": "Yes", "best_ask": yes_best,
+             "best_ask_size": arbmath.best_ask_size(yes_asks),
+             "token_id": token_ids[0]},
+            {"outcome": "No", "best_ask": no_best,
+             "best_ask_size": arbmath.best_ask_size(no_asks),
+             "token_id": token_ids[1]},
         ],
         # anything the validator flagged but did not reject — a signal that
         # is real often enough to record, wrong often enough not to trust
@@ -490,6 +498,7 @@ def scan_multi_outcome_event(group: dict, books: dict = None) -> tuple:
         legs_asks.append((outcome_name, asks))
         legs_detail.append({"outcome": outcome_name,
                             "best_ask": arbmath.best_ask(asks),
+                            "best_ask_size": arbmath.best_ask_size(asks),
                             "token_id": token_id})
 
     sum_asks = sum(leg["best_ask"] for leg in legs_detail)
@@ -520,10 +529,14 @@ def scan_multi_outcome_event(group: dict, books: dict = None) -> tuple:
                 validate.reject(NO_FILLABLE_SIZE))
 
     best = max(curve, key=lambda x: x["profit"])
+    top = arbmath.top_of_book(legs_asks, 1.0, fee_rate)
 
     return {
         "kind": "opportunity",
         "market_type": "multi",
+        "top_shares": top["shares"],
+        "top_capital": top["capital"],
+        "top_profit": top["profit"],
         "event_title": event.get("title"),
         "event_slug": event.get("slug"),
         "question": None,
@@ -651,10 +664,16 @@ def scan_multi_no_side(group: dict, books: dict = None) -> tuple:
                 validate.reject(NO_FILLABLE_SIZE))
 
     best = max(result["curve"], key=lambda x: x["profit"])
+    # payout is N-1 for a NO basket; passing 1 here would report every one
+    # of them as a loss
+    top = arbmath.top_of_book(legs_asks, payout, fee_rate)
 
     return {
         "kind": "opportunity",
         "market_type": "multi_no",
+        "top_shares": top["shares"],
+        "top_capital": top["capital"],
+        "top_profit": top["profit"],
         "event_title": event.get("title"),
         "event_slug": event.get("slug"),
         "question": None,

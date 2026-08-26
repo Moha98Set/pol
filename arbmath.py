@@ -93,6 +93,51 @@ def best_ask(levels: Sequence[Level]) -> Optional[float]:
     return levels[0][0] if levels else None
 
 
+def best_ask_size(levels: Sequence[Level]) -> float:
+    """Size resting at the cheapest ask, or 0 if the leg is dry."""
+    return levels[0][1] if levels else 0.0
+
+
+def top_of_book(legs, payout_per_basket: float = 1.0,
+                fee_rate: float = 0.0) -> dict:
+    """
+    What can be bought at the quoted prices, with no slippage at all.
+
+    The slippage curve answers "what size maximises profit", and its answer
+    walks down the book to get there — the average fill price is worse than
+    the quote, which is the whole reason the curve exists. This answers a
+    different question: how much fits at the price actually on screen.
+
+    A basket needs the same number of shares of every leg, so the answer is
+    the thinnest top level among them. On a thin edge that number is the
+    one worth trusting, because it is the only size whose profit does not
+    depend on the book holding still while you walk it.
+
+    Returns zeros for a dry leg rather than raising: an empty basket is a
+    real answer to "how much fits".
+    """
+    prices, sizes = [], []
+    for _name, levels in legs:
+        if not levels:
+            return {"shares": 0.0, "capital": 0.0, "profit": 0.0,
+                    "sum_best_asks": None}
+        prices.append(levels[0][0])
+        sizes.append(levels[0][1])
+
+    shares = min(sizes)
+    sum_asks = sum(prices)
+    capital = shares * sum_asks
+    # per-share fee is already in the same units as the per-basket edge
+    edge = payout_per_basket - sum_asks - fees.fee_per_share(prices, fee_rate)
+
+    return {
+        "shares": shares,
+        "capital": capital,
+        "profit": shares * edge,
+        "sum_best_asks": sum_asks,
+    }
+
+
 def depth_usd(levels: Sequence[Level]) -> float:
     """Total dollars resting on the ask side."""
     return sum(p * s for p, s in levels)

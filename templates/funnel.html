@@ -75,8 +75,8 @@
         {% for t in timings %}
         <tr>
           <td>{{ t.phase|stage_label }}</td>
-          <td class="num">{{ (t.avg_ms / 1000)|fa_num(1) }}s</td>
-          <td class="num">{{ (t.max_ms / 1000)|fa_num(1) }}s</td>
+          <td class="num">{{ t.avg_ms|duration }}</td>
+          <td class="num">{{ t.max_ms|duration }}</td>
         </tr>
         {% endfor %}
       </tbody>

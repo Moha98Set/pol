@@ -13,7 +13,10 @@
        <div class="note">ناخالص {{ opp.gross_edge|pct(3) }}</div></div>
   <div class="card"><div class="k">مجموع بهترین قیمت‌ها</div><div class="v num">{{ opp.sum_best_asks|fa_num(4) }}</div>
        <div class="note">پرداخت تضمینی {{ opp.payout_per_basket or 1 }} دلار</div></div>
-  <div class="card"><div class="k">سود در بهترین حالت</div><div class="v num good">{{ opp.best_profit|money(2) }}</div>
+  <div class="card"><div class="k">سرمایه‌ی بی‌اسلیپیج</div>
+       <div class="v num">{{ opp.top_capital|money(0) }}</div>
+       <div class="note">{{ opp.top_shares|fa_num(0) }} سهم · سود {{ opp.top_profit|money(2) }}</div></div>
+  <div class="card"><div class="k">سود با پیمودن دفتر</div><div class="v num good">{{ opp.best_profit|money(2) }}</div>
        <div class="note">با سرمایه‌ی {{ opp.best_capital|money }}</div></div>
   <div class="card"><div class="k">بازده</div><div class="v num">{{ opp.best_roi_pct|fa_num(2) }}٪</div></div>
   <div class="card"><div class="k">کارمزد دسته</div><div class="v num">{{ opp.fee_rate|pct(1) }}</div>

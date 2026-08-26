@@ -11,7 +11,7 @@
 
 <div class="cards">
   <div class="card"><div class="k">طول</div>
-    <div class="v num">{{ (win.duration_ms / 60000)|fa_num(1) }}<span style="font-size:14px"> دقیقه</span></div>
+    <div class="v num">{{ win.duration_ms|duration }}</div>
     {% if win.closed_at %}<div class="note">بسته شد {{ win.closed_at|ago }}</div>
     {% else %}<div class="note warn">هنوز باز است</div>{% endif %}</div>
   <div class="card"><div class="k">بهترین لبه</div>
@@ -58,7 +58,8 @@
         {% set zero_y = 200 - ((0 - lo) / span * 180) %}
         <line x1="0" y1="{{ zero_y }}" x2="800" y2="{{ zero_y }}"
               stroke="var(--good)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.8"/>
-        <text x="6" y="{{ zero_y - 6 }}" fill="var(--good)" font-size="12">نقطه‌ی سربه‌سر</text>
+        <text x="6" y="{{ zero_y - 6 }}" fill="var(--good)" font-size="12"
+              direction="ltr" text-anchor="start">نقطه‌ی سربه‌سر</text>
       {% endif %}
       <polyline fill="none" stroke="var(--accent)" stroke-width="2.5"
         points="{% for t in ticks %}{{ ((t.ts_ms - t0) / tspan * 800) if by_time else (loop.index0 * 800 / ((ticks|length - 1) or 1)) }},{{ 200 - ((t.comparable_edge - lo) / span * 180) }} {% endfor %}"/>
@@ -92,7 +93,7 @@
         {% for t in ticks %}
         <tr {% if t.comparable_edge == win.best_edge %}style="background:var(--good-soft)"{% endif %}>
           <td class="num" title="{{ t.recorded_at }}">{{ t.recorded_at[11:19] }}</td>
-          <td class="num">{{ ((t.ts_ms - ticks[0].ts_ms) / 1000)|fa_num(1) }}s</td>
+          <td class="num">{{ (t.ts_ms - ticks[0].ts_ms)|duration }}</td>
           <td class="num">{{ t.sum_best_asks|fa_num(4) }}</td>
           <td class="num {{ 'good' if t.comparable_edge > 0 else '' }}">{{ t.comparable_edge|pct(3) }}</td>
           <td class="num">{{ t.fillable_capital|money(0) }}</td>
@@ -117,7 +118,7 @@
         {% for o in others %}
         <tr>
           <td><a href="{{ url_for('window_detail', window_id=o.id) }}">{{ o.opened_at|ago }}</a></td>
-          <td class="num">{{ (o.duration_ms / 60000)|fa_num(1) }} دقیقه</td>
+          <td class="num">{{ o.duration_ms|duration }}</td>
           <td class="num {{ 'good' if o.best_edge and o.best_edge > 0 else '' }}">{{ o.best_edge|pct(3) }}</td>
           <td class="num">{{ o.best_sum_asks|fa_num(4) }}</td>
           <td>{{ 'بله' if o.crossed else '—' }}</td>

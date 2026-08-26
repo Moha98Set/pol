@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_sort.html" as sortui %}
 {% block title %}نزدیک‌ترین‌ها — داشبورد آربیتراژ{% endblock %}
 {% block body %}
 
@@ -8,23 +9,20 @@
   داستان روزانه اینجاست: چقدر نزدیک شدیم و روی کدام بازارها.
 </p>
 
-<form class="filters" method="get">
-  <div class="field">
-    <label for="scope">بازه</label>
-    <select id="scope" name="scope" onchange="this.form.submit()">
-      <option value="today" {{ 'selected' if scope == 'today' }}>امروز</option>
-      <option value="all"   {{ 'selected' if scope == 'all' }}>همه‌ی تاریخچه</option>
-    </select>
-  </div>
-</form>
+{{ sortui.ranges(sortstate) }}
 
 <div class="panel">
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>بازار</th><th>نوع</th><th>گزینه</th>
-        <th>مجموع قیمت</th><th>لبه‌ی ناخالص</th><th>لبه‌ی خالص</th>
-        <th>کارمزد</th><th>حجم ۲۴س</th><th>زمان</th>
+        <th>بازار</th><th>نوع</th>
+        {{ sortui.th('num_outcomes',  'گزینه',        sortstate) }}
+        {{ sortui.th('sum_best_asks', 'مجموع قیمت',   sortstate) }}
+        {{ sortui.th('gross_edge',    'لبه‌ی ناخالص', sortstate) }}
+        {{ sortui.th('net_edge',      'لبه‌ی خالص',   sortstate) }}
+        {{ sortui.th('fee_rate',      'کارمزد',       sortstate) }}
+        {{ sortui.th('volume_24h',    'حجم ۲۴س',      sortstate) }}
+        <th>زمان</th>
       </tr></thead>
       <tbody>
         {% for r in items %}

@@ -1,0 +1,82 @@
+{# Sortable header cell. `col` must be a key of the view's column map;
+   anything else the server ignores, so a hand-edited URL cannot reach SQL. #}
+{% macro th(col, label, state, align='left') %}
+  {% set active = state and state.sort == col %}
+  <th class="{{ 'num' if align == 'left' }}">
+    <a href="{{ sort_url(col) }}" class="sortlink {{ 'on' if active }}">
+      {{ label }}<span class="arrow">{{ '↓' if active and state.dir == 'desc'
+                                        else ('↑' if active else '') }}</span>
+    </a>
+  </th>
+{% endmacro %}
+
+
+{# The min/max row. One pair of boxes per numeric column, in the unit the
+   column is displayed in — percentages as percentages, durations as
+   minutes — because a box that silently means something else is worse
+   than no box. #}
+{% macro ranges(state) %}
+{% if state %}
+<details class="rangebox" {{ 'open' if state.active }}>
+  <summary>
+    فیلتر بازه‌ای
+    {% if state.active %}<span class="tag info">{{ state.active }} فعال</span>{% endif %}
+    <span class="hint">بازه‌ی زمانی و محدوده‌ی هر ستون عددی</span>
+  </summary>
+  <form method="get" class="rangeform">
+    {# carry every other filter through, so this form narrows rather than resets #}
+    {% for key, value in request.args.items() %}
+      {% if not key.startswith('min_') and not key.startswith('max_')
+            and key not in ['page', 'since', 'from', 'to'] %}
+        <input type="hidden" name="{{ key }}" value="{{ value }}">
+      {% endif %}
+    {% endfor %}
+
+    {% if state.has_time %}
+    <div class="timerow">
+      <div class="rangecol">
+        <label>بازه‌ی زمانی</label>
+        <select name="since">
+          {% for value, label in state.since_choices %}
+            <option value="{{ value }}" {{ 'selected' if state.time.get('since', '') == value }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="rangecol">
+        <label>از تاریخ</label>
+        <input type="date" name="from" value="{{ state.time.get('from', '') }}">
+      </div>
+      <div class="rangecol">
+        <label>تا تاریخ</label>
+        <input type="date" name="to" value="{{ state.time.get('to', '') }}">
+      </div>
+    </div>
+    <div class="rangesep"></div>
+    {% endif %}
+
+    <div class="rangegrid">
+      {% for name, spec in state.cols.items() %}
+        {% if spec.kind != 'text' %}
+        <div class="rangecol">
+          <label>{{ spec.label }}{% if spec.kind == 'percent' %} <span class="unit">٪</span>
+            {% elif spec.kind == 'money' %} <span class="unit">$</span>
+            {% elif spec.kind == 'duration' %} <span class="unit">دقیقه</span>{% endif %}</label>
+          <div class="pair">
+            <input type="number" step="{{ spec.step }}" placeholder="از"
+                   name="min_{{ name }}" value="{{ state.bounds.get('min_' ~ name, '') }}">
+            <input type="number" step="{{ spec.step }}" placeholder="تا"
+                   name="max_{{ name }}" value="{{ state.bounds.get('max_' ~ name, '') }}">
+          </div>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="rangeactions">
+      <button type="submit">اعمال</button>
+      <a class="btn ghost" href="{{ request.path }}">پاک کردن همه</a>
+    </div>
+  </form>
+</details>
+{% endif %}
+{% endmacro %}

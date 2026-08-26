@@ -35,9 +35,10 @@ import secrets
 import sqlite3
 import subprocess
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import (Flask, abort, flash, g, redirect, render_template,
                    request, session, url_for)
@@ -246,6 +247,38 @@ def ago(iso_string):
     return f"{int(seconds // 86400)} روز پیش"
 
 
+def duration(ms):
+    """
+    A span of milliseconds in the unit that keeps it readable.
+
+    Everything used to be printed in minutes, which turns a four-second
+    window into 0.1 and an hour-long one into 61.4 — both of which have to
+    be converted in the reader's head before they mean anything. Each range
+    gets the unit a person would use out loud for it.
+    """
+    if ms is None:
+        return "—"
+    try:
+        ms = float(ms)
+    except (TypeError, ValueError):
+        return "—"
+
+    if ms < 1000:
+        return f"{ms:.0f} میلی‌ثانیه"
+    seconds = ms / 1000
+    if seconds < 60:
+        # one decimal below ten seconds, where the difference between 2 and
+        # 2.5 decides whether a window was reachable at all
+        return f"{seconds:.1f} ثانیه" if seconds < 10 else f"{seconds:.0f} ثانیه"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f} دقیقه"
+    hours = minutes / 60
+    if hours < 24:
+        return f"{hours:.1f} ساعت"
+    return f"{hours / 24:.1f} روز"
+
+
 def fromjson(raw):
     """Decode a JSON column, treating anything unparseable as empty."""
     try:
@@ -260,12 +293,165 @@ def stage_note(stage):
 
 app.jinja_env.filters.update(
     fa_num=fa_num, pct=pct, money=money, ago=ago, fromjson=fromjson,
+    duration=duration,
     reason_label=glossary.reason_label,
     stage_label=glossary.stage_label,
     outcome_label=glossary.outcome_label,
 )
 app.jinja_env.globals.update(reason=glossary.reason, stage_note=stage_note,
                              UNITS=UNITS)
+
+
+# =====================================================================
+# Sorting and numeric range filters
+# =====================================================================
+# Both are applied in SQL rather than in the browser. A table can hold two
+# thousand rows across forty pages, and sorting only the fifty currently
+# rendered would answer "the largest on this page" while looking like it
+# answered "the largest". That is worse than no sorting at all.
+#
+# Column names never reach SQL from the request. Each view declares the
+# columns it allows and the expression each one maps to; anything else is
+# ignored.
+
+
+class Col:
+    """
+    One sortable, filterable column.
+
+    `scale` converts what a person types into what is stored. Edges live as
+    0.003 but are read as 0.300%, and a filter box that silently means
+    "30%" when someone types 0.3 is a trap — so percentage columns carry
+    0.01 and durations carry 60000, and the input stays in the unit shown
+    in the table.
+    """
+
+    def __init__(self, expr, label, kind="number", scale=1.0, step="any"):
+        self.expr = expr
+        self.label = label
+        self.kind = kind          # number | percent | money | duration
+        self.scale = scale
+        self.step = step
+
+
+# Time windows offered next to the numeric ranges. Kept short and coarse:
+# an analyst narrowing a table wants "the last few hours", and a date
+# picker for that is friction. Custom from/to is still available for the
+# cases these do not cover.
+SINCE_CHOICES = [
+    ("", "همه‌ی زمان‌ها"),
+    ("1h", "۱ ساعت اخیر"),
+    ("6h", "۶ ساعت اخیر"),
+    ("24h", "۲۴ ساعت اخیر"),
+    ("7d", "۷ روز اخیر"),
+    ("30d", "۳۰ روز اخیر"),
+]
+
+_SINCE_DELTA = {"1h": 3600, "6h": 6 * 3600, "24h": 86400,
+                "7d": 7 * 86400, "30d": 30 * 86400}
+
+
+def _time_clauses(time_col: str, default_since: str = ""):
+    """
+    Narrow by time. Timestamps are stored as ISO 8601 with a +00:00 offset
+    throughout, so a lexicographic comparison against another such string
+    is also a chronological one — no date parsing in SQL.
+    """
+    clauses, params, state = [], [], {}
+
+    since = request.args.get("since")
+    if since is None:
+        since = default_since
+    if since in _SINCE_DELTA:
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            seconds=_SINCE_DELTA[since])
+        clauses.append(f"{time_col} >= ?")
+        params.append(cutoff.isoformat())
+        state["since"] = since
+
+    # A bare date from a date input means midnight; the `to` bound is made
+    # inclusive of that whole day, which is what a person picking a day
+    # means by it.
+    frm = (request.args.get("from") or "").strip()
+    if frm:
+        clauses.append(f"{time_col} >= ?")
+        params.append(frm)
+        state["from"] = frm
+    to = (request.args.get("to") or "").strip()
+    if to:
+        clauses.append(f"{time_col} <= ?")
+        params.append(to + "T23:59:59.999999+00:00" if len(to) == 10 else to)
+        state["to"] = to
+
+    return clauses, params, state
+
+
+def sort_and_filter(cols: dict, default: str, default_dir: str = "desc",
+                    time_col: str = None, default_since: str = ""):
+    """
+    Build (order_by, where_clauses, params, state) from the query string.
+
+    `state` is what the template needs to render the headers and the boxes
+    without re-deriving any of it.
+    """
+    col = request.args.get("sort") or default
+    if col not in cols:
+        col = default
+    direction = request.args.get("dir")
+    if direction not in ("asc", "desc"):
+        direction = default_dir
+
+    expr = cols[col].expr
+    # NULLs last in both directions: a row with no edge is not the best
+    # edge, and it is not the worst one either — it is missing.
+    order_by = f"({expr} IS NULL), {expr} {direction.upper()}"
+
+    clauses, params, bounds = [], [], {}
+    for name, spec in cols.items():
+        for bound, op in (("min", ">="), ("max", "<=")):
+            key = f"{bound}_{name}"
+            raw = (request.args.get(key) or "").strip()
+            if not raw:
+                continue
+            try:
+                value = float(raw)
+            except ValueError:
+                continue
+            bounds[key] = raw
+            clauses.append(f"{spec.expr} {op} ?")
+            params.append(value * spec.scale)
+
+    time_state = {}
+    if time_col:
+        tc, tp, time_state = _time_clauses(time_col, default_since)
+        clauses += tc
+        params += tp
+
+    return order_by, clauses, params, {
+        "cols": cols, "sort": col, "dir": direction, "bounds": bounds,
+        "time": time_state, "has_time": bool(time_col),
+        "since_choices": SINCE_CHOICES,
+        "active": len(bounds) + len(time_state),
+    }
+
+
+def sort_url(col: str) -> str:
+    """
+    Link for a column header. Clicking the active column flips direction;
+    clicking another starts it descending, which is the interesting end for
+    every number in this dashboard.
+    """
+    args = request.args.to_dict()
+    if args.get("sort") == col and args.get("dir", "desc") == "desc":
+        args["dir"] = "asc"
+    else:
+        args["dir"] = "desc"
+    args["sort"] = col
+    args.pop("page", None)        # a new order means page 1
+    return f"{request.path}?{urlencode(args)}"
+
+
+app.jinja_env.globals.update(sort_url=sort_url)
 
 
 # =====================================================================
@@ -323,6 +509,46 @@ def logout():
 # =====================================================================
 
 
+# The overview trend, by time rather than by scan count.
+#
+# Each range carries its own bucket, because 30 days at a 15-minute scan
+# interval is ~2900 points and a 400px sparkline can show perhaps sixty of
+# them. Bucketing keeps every range at roughly 24-30 points, so the shape
+# stays readable and the x-axis stays honest — one point is one span of
+# time, not one scan, and a gap where the monitor was down reads as a gap.
+TREND_RANGES = {
+    "6h":  ("۶ ساعت",  6 * 3600,
+            "strftime('%Y-%m-%dT%H:', found_at) || "
+            "printf('%02d', (CAST(strftime('%M', found_at) AS INTEGER)/15)*15)"),
+    "12h": ("۱۲ ساعت", 12 * 3600,
+            "strftime('%Y-%m-%dT%H:', found_at) || "
+            "printf('%02d', (CAST(strftime('%M', found_at) AS INTEGER)/30)*30)"),
+    "1d":  ("۱ روز",   86400,
+            "strftime('%Y-%m-%dT%H:00', found_at)"),
+    "7d":  ("۷ روز",   7 * 86400,
+            "strftime('%Y-%m-%dT', found_at) || "
+            "printf('%02d:00', (CAST(strftime('%H', found_at) AS INTEGER)/6)*6)"),
+    "30d": ("۳۰ روز",  30 * 86400,
+            "strftime('%Y-%m-%d', found_at)"),
+}
+TREND_DEFAULT = "1d"
+
+
+def _trend(range_key: str):
+    """Best edge per bucket over the chosen window, oldest first."""
+    label, seconds, bucket = TREND_RANGES[range_key]
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(seconds=seconds)).isoformat()
+    return rows(f"""
+        SELECT {bucket} AS bucket,
+               MAX(net_edge) best,
+               COUNT(*) n
+        FROM near_misses
+        WHERE found_at >= ?
+        GROUP BY bucket ORDER BY bucket
+    """, (cutoff,))
+
+
 @app.route("/")
 @login_required
 def overview():
@@ -358,17 +584,19 @@ def overview():
         GROUP BY code ORDER BY n DESC LIMIT 6
     """)
 
-    # The trend an analyst actually watches: how close the market came,
-    # scan by scan. Rendered as an inline sparkline, no chart library.
-    trend = rows("""
-        SELECT scan_id, MAX(net_edge) best FROM near_misses
-        GROUP BY scan_id ORDER BY scan_id DESC LIMIT 40
-    """)
+    # The trend an analyst actually watches: how close the market came.
+    # Rendered as an inline sparkline, no chart library.
+    trend_range = request.args.get("range", TREND_DEFAULT)
+    if trend_range not in TREND_RANGES:
+        trend_range = TREND_DEFAULT
+    trend = _trend(trend_range)
 
     return render_template(
         "overview.html", last=last, today=today, best=best,
         recent_scans=recent_scans, top_reasons=top_reasons,
-        trend=list(reversed(trend)),
+        trend=trend, trend_range=trend_range,
+        trend_label=TREND_RANGES[trend_range][0],
+        trend_ranges=TREND_RANGES,
         opportunities_total=one(
             "SELECT COUNT(*) c FROM opportunities")["c"],
         signals_total=one("SELECT COUNT(*) c FROM signals")["c"],
@@ -380,17 +608,37 @@ def overview():
 # =====================================================================
 
 
+OPP_COLS = {
+    "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
+    "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
+    "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
+    "fee_rate":      Col("fee_rate", "کارمزد", "percent", 0.01, "0.1"),
+    "top_capital":   Col("top_capital", "سرمایه‌ی بی‌اسلیپیج", "money",
+                         step="10"),
+    "top_profit":    Col("top_profit", "سود بی‌اسلیپیج", "money", step="0.5"),
+    "best_capital":  Col("best_capital", "سرمایه با اسلیپیج", "money",
+                         step="10"),
+    "best_profit":   Col("best_profit", "سود با اسلیپیج", "money", step="1"),
+    "best_roi_pct":  Col("best_roi_pct", "بازده", step="0.1"),
+}
+
+
 @app.route("/opportunities")
 @login_required
 def opportunities():
     page = max(1, request.args.get("page", 1, type=int))
-    total = one("SELECT COUNT(*) c FROM opportunities")["c"]
-    items = rows("""
-        SELECT * FROM opportunities
-        ORDER BY found_at DESC, net_edge DESC LIMIT ? OFFSET ?
-    """, (PAGE_SIZE, (page - 1) * PAGE_SIZE))
+    order_by, clauses, params, sortstate = sort_and_filter(
+        OPP_COLS, "top_profit", time_col="found_at")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    total = one(f"SELECT COUNT(*) c FROM opportunities{where}", params)["c"]
+    items = rows(f"""
+        SELECT * FROM opportunities{where}
+        ORDER BY {order_by} LIMIT ? OFFSET ?
+    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
     return render_template("opportunities.html", items=items, total=total,
-                           page=page, pages=_pages(total))
+                           page=page, pages=_pages(total),
+                           sortstate=sortstate)
 
 
 @app.route("/opportunity/<int:opp_id>")
@@ -411,21 +659,37 @@ def opportunity_detail(opp_id):
 # =====================================================================
 
 
+MISS_COLS = {
+    "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
+    "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
+    "gross_edge":    Col("gross_edge", "لبه‌ی ناخالص", "percent", 0.01, "0.001"),
+    "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
+    "fee_rate":      Col("fee_rate", "کارمزد", "percent", 0.01, "0.1"),
+    "volume_24h":    Col("volume_24h", "حجم ۲۴س", "money", step="100"),
+}
+
+
 @app.route("/near-misses")
 @login_required
 def near_misses():
     page = max(1, request.args.get("page", 1, type=int))
-    scope = request.args.get("scope", "today")
 
-    where = "WHERE date(found_at) = date('now')" if scope == "today" else ""
-    total = one(f"SELECT COUNT(*) c FROM near_misses {where}")["c"]
+    # 24h by default. The page used to be pinned to "today", and dropping
+    # to no window at all would quietly turn a short table into the whole
+    # history the first time someone opened it.
+    order_by, clauses, params, sortstate = sort_and_filter(
+        MISS_COLS, "net_edge", time_col="found_at", default_since="24h")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    total = one(f"SELECT COUNT(*) c FROM near_misses{where}", params)["c"]
     items = rows(f"""
-        SELECT * FROM near_misses {where}
-        ORDER BY net_edge DESC LIMIT ? OFFSET ?
-    """, (PAGE_SIZE, (page - 1) * PAGE_SIZE))
+        SELECT * FROM near_misses{where}
+        ORDER BY {order_by} LIMIT ? OFFSET ?
+    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
 
     return render_template("near_misses.html", items=items, total=total,
-                           page=page, pages=_pages(total), scope=scope)
+                           page=page, pages=_pages(total),
+                           sortstate=sortstate)
 
 
 # =====================================================================
@@ -472,6 +736,15 @@ def _verdict_filters():
     return " WHERE " + " AND ".join(clauses), params
 
 
+VERDICT_COLS = {
+    "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
+    "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
+    "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
+    "fee_rate":      Col("fee_rate", "کارمزد", "percent", 0.01, "0.1"),
+    "volume_24h":    Col("volume_24h", "حجم ۲۴س", "money", step="100"),
+}
+
+
 @app.route("/markets")
 @login_required
 def markets():
@@ -480,18 +753,22 @@ def markets():
 
     page = max(1, request.args.get("page", 1, type=int))
     where, params = _verdict_filters()
+    order_by, extra, extra_params, sortstate = sort_and_filter(
+        VERDICT_COLS, "net_edge", time_col="recorded_at")
+    if extra:
+        where += " AND " + " AND ".join(extra)
+        params = [*params, *extra_params]
 
     total = one(f"SELECT COUNT(*) c FROM event_verdicts {where}", params)["c"]
     items = rows(f"""
         SELECT * FROM event_verdicts {where}
-        ORDER BY (net_edge IS NULL), net_edge DESC, volume_24h DESC
-        LIMIT ? OFFSET ?
+        ORDER BY {order_by} LIMIT ? OFFSET ?
     """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
 
     return render_template(
         "markets.html", items=items, total=total, page=page,
         pages=_pages(total), title="بازارهای بررسی‌شده",
-        suspicions=glossary.SUSPICIONS,
+        suspicions=glossary.SUSPICIONS, sortstate=sortstate,
         codes=_codes_in_scope(), scans=_recent_scan_ids(),
         show_outcome_filter=True)
 
@@ -505,11 +782,16 @@ def rejected():
     page = max(1, request.args.get("page", 1, type=int))
     where, params = _verdict_filters()
     where += " AND outcome = 'rejected'"
+    order_by, extra, extra_params, sortstate = sort_and_filter(
+        VERDICT_COLS, "volume_24h", time_col="recorded_at")
+    if extra:
+        where += " AND " + " AND ".join(extra)
+        params = [*params, *extra_params]
 
     total = one(f"SELECT COUNT(*) c FROM event_verdicts {where}", params)["c"]
     items = rows(f"""
         SELECT * FROM event_verdicts {where}
-        ORDER BY volume_24h DESC LIMIT ? OFFSET ?
+        ORDER BY {order_by} LIMIT ? OFFSET ?
     """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
 
     # Reason breakdown for the scan in view, so the table has a summary
@@ -522,7 +804,7 @@ def rejected():
     return render_template(
         "markets.html", items=items, total=total, page=page,
         pages=_pages(total), title="بازارهای رد شده",
-        suspicions=glossary.SUSPICIONS,
+        suspicions=glossary.SUSPICIONS, sortstate=sortstate,
         codes=_codes_in_scope(rejected_only=True), scans=_recent_scan_ids(),
         breakdown=breakdown, show_outcome_filter=False)
 
@@ -561,6 +843,19 @@ def market_detail(slug):
 # =====================================================================
 
 
+WINDOW_COLS = {
+    # duration is typed in minutes and stored in milliseconds — the filter
+    # box must mean what the column shows
+    "duration_ms":   Col("duration_ms", "طول", "duration", 60_000, "0.5"),
+    "best_edge":     Col("best_edge", "بهترین لبه", "percent", 0.01, "0.001"),
+    "best_sum_asks": Col("best_sum_asks", "کف قیمت", step="0.0001"),
+    "best_capital":  Col("best_capital", "قابل جذب", "money", step="10"),
+    "best_profit":   Col("best_profit", "سود", "money", step="0.5"),
+    "ticks":         Col("ticks", "تیک", step="1"),
+    "opened_at":     Col("opened_at", "باز شد", "text"),
+}
+
+
 @app.route("/windows")
 @login_required
 def windows():
@@ -569,20 +864,19 @@ def windows():
 
     page = max(1, request.args.get("page", 1, type=int))
     crossed_only = request.args.get("crossed") == "1"
-    min_minutes = request.args.get("min_minutes", 0, type=float)
 
-    clauses, params = ["closed_at IS NOT NULL"], []
+    order_by, extra, params, sortstate = sort_and_filter(
+        WINDOW_COLS, "opened_at", time_col="opened_at")
+    clauses = ["closed_at IS NOT NULL"]
     if crossed_only:
         clauses.append("crossed = 1")
-    if min_minutes:
-        clauses.append("duration_ms >= ?")
-        params.append(min_minutes * 60_000)
+    clauses += extra
     where = " WHERE " + " AND ".join(clauses)
 
     total = one(f"SELECT COUNT(*) c FROM edge_windows{where}", params)["c"]
     items = rows(f"""
         SELECT * FROM edge_windows{where}
-        ORDER BY opened_at DESC LIMIT ? OFFSET ?
+        ORDER BY {order_by} LIMIT ? OFFSET ?
     """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
 
     summary = one("""
@@ -623,7 +917,7 @@ def windows():
         "windows.html", items=items, total=total, page=page,
         pages=_pages(total), summary=summary, live=live, buckets=buckets,
         by_hour={r["hour"]: r["n"] for r in by_hour},
-        crossed_only=crossed_only, min_minutes=min_minutes)
+        crossed_only=crossed_only, sortstate=sortstate)
 
 
 @app.route("/window/<int:window_id>")

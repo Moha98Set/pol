@@ -66,6 +66,11 @@ CREATE TABLE IF NOT EXISTS opportunities (
     best_profit REAL,
     best_roi_pct REAL,
 
+    -- top of book only: the size available at the quoted price
+    top_shares REAL,
+    top_capital REAL,
+    top_profit REAL,
+
     slippage_curve TEXT,                 -- JSON array
     legs_detail TEXT,                    -- JSON: per-leg best ask info
 
@@ -353,6 +358,13 @@ MIGRATIONS = [
     # from the row and a stored opportunity cannot be re-checked later.
     ("opportunities", "payout_per_basket", "REAL"),
     ("opportunities", "net_edge_per_basket", "REAL"),
+    # What fits at the quoted price, with no slippage at all. best_capital
+    # is the profit-maximising rung of the ladder and gets there by walking
+    # down the book at worse prices; these three answer the different
+    # question of how much the top of book alone can take.
+    ("opportunities", "top_shares", "REAL"),
+    ("opportunities", "top_capital", "REAL"),
+    ("opportunities", "top_profit", "REAL"),
 ]
 
 
@@ -413,10 +425,11 @@ def save_opportunity(db: sqlite3.Connection, scan_id: int, opp: dict):
             num_outcomes, yes_ask, no_ask, sum_best_asks, gross_edge, net_edge,
             fee_rate,
             best_capital, best_shares, best_real_cost, best_profit, best_roi_pct,
+            top_shares, top_capital, top_profit,
             slippage_curve, legs_detail, suspicions, url,
             payout_per_basket, net_edge_per_basket
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                  ?, ?, ?, ?, ?, ?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         scan_id, utcnow(), opp["market_type"],
         opp.get("event_title"), opp.get("event_slug"), opp.get("question"),
@@ -427,6 +440,7 @@ def save_opportunity(db: sqlite3.Connection, scan_id: int, opp: dict):
         opp.get("best_capital"), opp.get("best_shares"),
         opp.get("best_real_cost"), opp.get("best_profit"),
         opp.get("best_roi_pct"),
+        opp.get("top_shares"), opp.get("top_capital"), opp.get("top_profit"),
         json.dumps(opp.get("slippage_curve")),
         json.dumps(opp.get("legs_detail")),
         json.dumps(opp.get("suspicions") or []),

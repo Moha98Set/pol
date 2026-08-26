@@ -51,32 +51,77 @@
 </div>
 {% endif %}
 
-{% if trend %}
 <div class="panel">
-  <h2>روند نزدیک‌ترین لبه در ۴۰ اسکن اخیر</h2>
+  <h2>روند نزدیک‌ترین لبه — {{ trend_label }} اخیر</h2>
   <div class="body">
-    {% set vals = trend | map(attribute='best') | select('defined') | list %}
-    {% if vals | length > 1 %}
+
+    <div class="rangetabs">
+      {% for key, (label, _s, _b) in trend_ranges.items() %}
+        <a href="{{ url_for('overview', range=key) }}"
+           class="{{ 'on' if trend_range == key }}">{{ label }}</a>
+      {% endfor %}
+    </div>
+
+    {% set pts = trend | selectattr('best', 'ne', None) | list %}
+    {% if pts | length > 1 %}
+      {% set vals = pts | map(attribute='best') | list %}
       {% set lo = vals | min %}{% set hi = vals | max %}
-      {% set span = (hi - lo) if (hi - lo) > 0 else 0.0001 %}
-      <svg class="spark" viewBox="0 0 400 60" preserveAspectRatio="none" role="img"
-           aria-label="روند بهترین لبه">
+      {# always keep zero in frame: the whole question is whether the line
+         reaches it, and a chart scaled to the data alone hides how far
+         away that is #}
+      {% set ylo = [lo, 0] | min %}{% set yhi = [hi, 0] | max %}
+      {% set span = (yhi - ylo) if (yhi - ylo) > 0 else 0.0001 %}
+      {% set n = pts | length %}
+      {% set zero_y = 150 - ((0 - ylo) / span * 130) %}
+
+      <svg viewBox="0 0 800 175" preserveAspectRatio="none"
+           style="display:block;width:100%;height:175px" role="img"
+           aria-label="روند بهترین لبه در {{ trend_label }} اخیر">
+        <line x1="0" y1="{{ zero_y }}" x2="800" y2="{{ zero_y }}"
+              stroke="var(--good)" stroke-width="1.5" stroke-dasharray="6 4" opacity="0.75"/>
+        <!-- direction:ltr on the label itself: the page is RTL, so a
+             start-anchored run grows leftward from x and falls off the
+             canvas, which clipped this to its first glyph. -->
+        <text x="6" y="{{ zero_y - 6 }}" fill="var(--good)" font-size="11"
+              direction="ltr" text-anchor="start">آربیتراژ</text>
+
         <polyline fill="none" stroke="var(--accent)" stroke-width="2"
-          points="{% for r in trend %}{{ loop.index0 * (400 / (trend|length - 1)) }},{{ 54 - ((r.best - lo) / span * 48) }} {% endfor %}"/>
+          points="{% for p in pts %}{{ loop.index0 * (800 / (n - 1)) }},{{ 150 - ((p.best - ylo) / span * 130) }} {% endfor %}"/>
+
+        {% for p in pts %}
+          <circle cx="{{ loop.index0 * (800 / (n - 1)) }}"
+                  cy="{{ 150 - ((p.best - ylo) / span * 130) }}"
+                  r="{{ 3.5 if p.best >= 0 else 2 }}"
+                  fill="{{ 'var(--good)' if p.best >= 0 else 'var(--accent)' }}">
+            <title>{{ p.bucket }} — {{ p.best|pct(3) }} ({{ p.n }} مورد)</title>
+          </circle>
+        {% endfor %}
       </svg>
-      <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:13px">
-        <span>کمترین <span class="num">{{ lo|pct(3) }}</span></span>
-        <span>بیشترین <span class="num">{{ hi|pct(3) }}</span></span>
+
+      <div class="axis">
+        <span class="num">{{ pts[0].bucket }}</span>
+        <span>بیشترین <span class="num {{ 'good' if hi > 0 else '' }}">{{ hi|pct(3) }}</span>
+              · کمترین <span class="num">{{ lo|pct(3) }}</span></span>
+        <span class="num">{{ pts[-1].bucket }}</span>
       </div>
-      <p class="sub" style="margin-top:12px">
-        هرچه خط بالاتر برود، بازار به آربیتراژ نزدیک‌تر شده است. عبور از صفر یعنی فرصت واقعی.
+
+      <p class="sub" style="margin-top:14px">
+        هر نقطه بهترین لبه‌ی آن بازه است، نه یک اسکن — پس بازه‌های بلندتر
+        جمع‌بندی می‌شوند و شکل خوانا می‌ماند. نشانگر را روی هر نقطه نگه دارید
+        تا زمان و تعداد موردش را ببینید.
+        رسیدن به خط چین‌دار یعنی فرصت واقعی.
+      </p>
+    {% elif pts | length == 1 %}
+      <p class="sub" style="margin:0">
+        فقط یک نقطه در این بازه هست. بازه‌ی بلندتری انتخاب کنید.
       </p>
     {% else %}
-      <p class="sub" style="margin:0">برای رسم روند به داده‌ی بیشتری نیاز است.</p>
+      <p class="sub" style="margin:0">
+        در {{ trend_label }} اخیر داده‌ای ثبت نشده است.
+      </p>
     {% endif %}
   </div>
 </div>
-{% endif %}
 
 <div class="panel">
   <h2>چرا بازارها کنار گذاشته شدند — ۲۰ اسکن اخیر</h2>
@@ -120,7 +165,7 @@
           <td class="num">{{ s.opportunities_found }}</td>
           <td class="num">{{ s.near_misses_saved }}</td>
           <td class="num">{{ s.errors }}</td>
-          <td class="num">{% if s.analysis_ms %}{{ (s.analysis_ms / 1000)|fa_num(1) }}s{% else %}—{% endif %}</td>
+          <td class="num">{{ s.analysis_ms|duration }}</td>
         </tr>
         {% else %}
         <tr><td colspan="9" class="empty">هنوز اسکنی ثبت نشده است.</td></tr>
