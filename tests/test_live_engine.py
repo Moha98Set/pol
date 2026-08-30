@@ -796,3 +796,72 @@ def test_staying_on_one_side_still_makes_a_single_window(recording_engine):
 
     assert recording_engine.db.execute(
         "SELECT COUNT(*) c FROM edge_windows").fetchone()["c"] == 1
+
+
+# =====================================================================
+# The socket's token budget
+# =====================================================================
+
+
+class FakeWatched:
+    """Just enough of a WatchedEvent for the budget to be decided."""
+
+    def __init__(self, slug, ntokens):
+        self.slug = slug
+        self.token_ids = [f"{slug}-{i}" for i in range(ntokens)]
+
+
+def test_the_budget_takes_whole_events_only(recording_engine):
+    """
+    Truncating the token list after the fact cuts through the middle of an
+    event: some legs subscribed, the rest never. Its books never fill,
+    build_legs always returns None, and it sits in the watchlist producing
+    nothing while the log counts it as watched.
+    """
+    candidates = [FakeWatched("a", 3), FakeWatched("b", 3),
+                  FakeWatched("c", 3)]
+
+    chosen, dropped = live_engine.fit_to_budget(candidates, budget=7)
+
+    assert [w.slug for w in chosen] == ["a", "b"]
+    assert dropped == 1
+    assert sum(len(w.token_ids) for w in chosen) <= 7
+
+
+def test_a_budget_that_fits_everything_drops_nothing(recording_engine):
+    candidates = [FakeWatched("a", 3), FakeWatched("b", 4)]
+    chosen, dropped = live_engine.fit_to_budget(candidates, budget=400)
+    assert len(chosen) == 2 and dropped == 0
+
+
+def test_a_wide_event_is_skipped_rather_than_split(recording_engine):
+    """
+    A ten-leg event that does not fit is passed over, and narrower ones
+    after it still get in — better than spending the remaining budget on
+    part of it and watching nothing usable.
+    """
+    candidates = [FakeWatched("wide", 10), FakeWatched("narrow", 2)]
+
+    chosen, dropped = live_engine.fit_to_budget(candidates, budget=5)
+
+    assert [w.slug for w in chosen] == ["narrow"]
+    assert dropped == 1
+
+
+def test_candidates_are_taken_in_the_order_given(recording_engine):
+    """Ranked closest-to-arbitrage first, so what drops is the least
+    interesting."""
+    candidates = [FakeWatched(str(i), 2) for i in range(10)]
+    chosen, _dropped = live_engine.fit_to_budget(candidates, budget=6)
+    assert [w.slug for w in chosen] == ["0", "1", "2"]
+
+
+def test_the_stream_no_longer_trims_the_subscription(recording_engine):
+    """
+    build_watchlist fits the selection inside the budget, so the stream
+    must subscribe to all of it — trimming again would undo the fit.
+    """
+    import inspect
+    src = inspect.getsource(live_engine.LiveEngine._stream)
+    assert "[:MAX_TOKENS_PER_SOCKET]" not in src
+    assert "list(self.token_to_events)" in src

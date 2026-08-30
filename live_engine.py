@@ -269,6 +269,29 @@ class WatchedEvent:
 # =====================================================================
 
 
+def fit_to_budget(candidates, budget: int):
+    """
+    Take whole events until the socket's token budget is spent.
+
+    Returns (chosen, dropped). An event is all-or-nothing: subscribing to
+    some of its legs and not the rest leaves its books permanently
+    incomplete, so it can never produce a signal while still occupying a
+    watchlist slot and appearing in the log as watched.
+
+    Candidates are consumed in order, which is closest-to-arbitrage first,
+    so what gets dropped is always the least interesting of them.
+    """
+    chosen, used, dropped = [], 0, 0
+    for we in candidates:
+        need = len(we.token_ids)
+        if used + need > budget:
+            dropped += 1
+            continue
+        chosen.append(we)
+        used += need
+    return chosen, dropped
+
+
 class LiveEngine:
     def __init__(self, *, top_n: int = None, min_edge: float = None,
                  capitals=None, on_signal: Callable[[dict], None] = None,
@@ -358,7 +381,23 @@ class LiveEngine:
             scored.append((sum_asks, we))
 
         scored.sort(key=lambda x: x[0])  # closest to (and below) 1.0 first
-        chosen = [we for _s, we in scored[:self.top_n]]
+
+        # Take whole events until the socket's token budget is spent.
+        #
+        # The subscription used to be truncated at MAX_TOKENS_PER_SOCKET
+        # after the fact, which cut through the middle of an event: some
+        # of its legs were subscribed and the rest never were, so its
+        # books never filled, build_legs always returned None, and it sat
+        # in the watchlist producing nothing. The log still counted it as
+        # watched. Better to watch fewer events completely and say so.
+        chosen, dropped = fit_to_budget(
+            [we for _s, we in scored[:self.top_n]], MAX_TOKENS_PER_SOCKET)
+
+        if dropped:
+            log.warning(
+                "Token budget full: %d event(s) left unwatched. Raise "
+                "MAX_TOKENS_PER_SOCKET or lower LIVE_TOP_N — a partly "
+                "subscribed event would never produce a signal.", dropped)
 
         self.events = {we.slug: we for we in chosen}
         self.token_to_events = {}
@@ -372,8 +411,10 @@ class LiveEngine:
             if token_id not in self.token_to_events:
                 del self.books[token_id]
 
-        log.info("Watching %d events / %d tokens (best sum_asks=%.4f)",
-                 len(chosen), len(self.token_to_events),
+        log.info("Watching %d of %d eligible events / %d tokens "
+                 "(budget %d, best sum_asks=%.4f)",
+                 len(chosen), len(scored), len(self.token_to_events),
+                 MAX_TOKENS_PER_SOCKET,
                  scored[0][0] if scored else float("nan"))
 
     # -----------------------------------------------------------------
@@ -783,7 +824,9 @@ class LiveEngine:
                 return
 
     async def _stream(self):
-        token_ids = list(self.token_to_events)[:MAX_TOKENS_PER_SOCKET]
+        # build_watchlist already fits the selection inside the budget, so
+        # this subscribes to every token of every watched event.
+        token_ids = list(self.token_to_events)
         if not token_ids:
             log.warning("Nothing to watch; retrying after refresh")
             await asyncio.sleep(30)
