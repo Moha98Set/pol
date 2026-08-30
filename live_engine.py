@@ -197,6 +197,10 @@ class WatchedEvent:
         self.is_binary = group["is_binary"]
         self.fee_rate = group["fee_rate"]
         self.url = f"https://polymarket.com/event/{self.slug}"
+        # When the market settles, and therefore when capital tied up in a
+        # basket comes back. Nothing in the pipeline stored this, which
+        # left the paper wallet unable to model money ever returning.
+        self.end_date = event.get("endDate")
 
         # (outcome_name, token_id) for every leg we must buy
         self.legs: List[tuple] = []
@@ -513,6 +517,16 @@ class LiveEngine:
         sum_asks = result.get("sum_best_asks")
         crossed = edge >= self.min_edge
 
+        # A window that flips sides is a different basket on the same
+        # event — YES pays 1, NO pays N-1, and they are priced off
+        # opposite sides of the book. Carrying one window across the flip
+        # would leave `side` and `payout` describing the basket it opened
+        # on while `best_sum_asks` came from the other, so the row's own
+        # arithmetic would not hold. The signal path already splits here;
+        # this keeps the two consistent.
+        if watched.window is not None and watched.window["side"] != side:
+            self._close_window(watched, now, edge)
+
         # Depth, not just price. A ten-minute window that was never
         # fillable past five dollars charts identically to one worth
         # taking, and "you cannot fill it" is already the most common
@@ -537,6 +551,7 @@ class LiveEngine:
                 "fee_rate": watched.fee_rate,
                 "payout": 1.0 if side == "yes" else max(len(watched.legs) - 1, 1),
                 "opened_at": stamp,
+                "end_date": watched.end_date,
                 "edge": edge,
                 "sum_best_asks": sum_asks,
                 "fillable_capital": cap,
@@ -545,7 +560,7 @@ class LiveEngine:
                 "url": watched.url,
             })
             watched.window = {
-                "id": window_id, "opened": now, "ticks": 0,
+                "id": window_id, "opened": now, "ticks": 0, "side": side,
                 "best_edge": edge, "best_sum_asks": sum_asks,
                 "best_capital": cap, "best_profit": prof,
                 "best_at": stamp, "crossed": crossed, "dirty": False,

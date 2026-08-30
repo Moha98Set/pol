@@ -732,3 +732,67 @@ def test_a_thin_window_is_distinguishable_from_a_deep_one(recording_engine):
     # identical prices, so the edge alone could never separate them
     assert by_slug["thin"]["best_sum_asks"] == pytest.approx(
         by_slug["fat"]["best_sum_asks"])
+
+
+def push_side(engine, watched, side, edge, sum_asks=1.0):
+    engine._record_edge(watched, side,
+                        {"sum_best_asks": sum_asks, "net_edge": edge,
+                         "best": {"real_cost": 100.0, "profit": 1.0}}, edge)
+
+
+def test_a_window_that_flips_sides_becomes_two_windows(recording_engine):
+    """
+    YES pays 1 and NO pays N-1, priced off opposite sides of the book, so
+    they are different baskets on the same event. Carried across the flip
+    in one row, `side` and `payout` would describe the basket it opened on
+    while the price came from the other, and the row's own arithmetic
+    would not hold.
+    """
+    watched = watch(recording_engine, "flipper", n=3)
+
+    push_side(recording_engine, watched, "yes", -0.010, sum_asks=1.010)
+    push_side(recording_engine, watched, "no", -0.004, sum_asks=2.004)
+    push_side(recording_engine, watched, "no", -0.9)      # leaves the band
+
+    rows_ = recording_engine.db.execute(
+        "SELECT * FROM edge_windows ORDER BY id").fetchall()
+    assert len(rows_) == 2
+    assert [r["side"] for r in rows_] == ["yes", "no"]
+
+
+def test_each_side_keeps_its_own_price(recording_engine):
+    watched = watch(recording_engine, "prices", n=3)
+
+    push_side(recording_engine, watched, "yes", -0.010, sum_asks=1.010)
+    push_side(recording_engine, watched, "no", -0.004, sum_asks=2.004)
+    push_side(recording_engine, watched, "no", -0.9)
+
+    by_side = {r["side"]: r for r in
+               recording_engine.db.execute("SELECT * FROM edge_windows")}
+    assert by_side["yes"]["best_sum_asks"] == pytest.approx(1.010)
+    assert by_side["no"]["best_sum_asks"] == pytest.approx(2.004)
+
+
+def test_a_window_payout_matches_the_side_it_recorded(recording_engine):
+    """The wallet has to buy the basket the row describes."""
+    watched = watch(recording_engine, "payouts", n=3)
+
+    push_side(recording_engine, watched, "yes", -0.01, sum_asks=1.01)
+    push_side(recording_engine, watched, "no", -0.01, sum_asks=2.01)
+    push_side(recording_engine, watched, "no", -0.9)
+
+    by_side = {r["side"]: r for r in
+               recording_engine.db.execute("SELECT * FROM edge_windows")}
+    assert by_side["yes"]["payout"] == pytest.approx(1.0)
+    assert by_side["no"]["payout"] == pytest.approx(2.0)   # N-1 for 3 legs
+
+
+def test_staying_on_one_side_still_makes_a_single_window(recording_engine):
+    watched = watch(recording_engine, "steady", n=3)
+
+    for edge in (-0.010, -0.006, -0.002, -0.008):
+        push_side(recording_engine, watched, "yes", edge, sum_asks=1 - edge)
+    push_side(recording_engine, watched, "yes", -0.9)
+
+    assert recording_engine.db.execute(
+        "SELECT COUNT(*) c FROM edge_windows").fetchone()["c"] == 1

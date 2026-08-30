@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}کیف پول کاغذی — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>کیف پول کاغذی</h1>
+<p class="sub">
+  پول واقعی درگیر نیست. هر اجرا، پنجره‌های ثبت‌شده را از اول بازپخش می‌کند و
+  می‌پرسد: با این پارامترها، چه چیزی خریده می‌شد و چقدر سود می‌داد؟
+</p>
+
+<div class="panel"><div class="body" style="line-height:1.95">
+  سه قاعده که نمی‌گذارند نتیجه به خودش دروغ بگوید:
+  <br><br>
+  <strong>۱.</strong> هرگز در بهترین قیمت پنجره نمی‌خرد. ورود در اولین تیک
+  <em>پس از تأخیر واقعی اجرا</em> است — دروازه‌ی سن سیگنال، بازخوانی دفترها، و
+  یک سفارش به‌ازای هر پا که پشت سر هم ثبت می‌شوند. سبد ده‌پایه ثانیه‌ها دیرتر
+  از سبد دوپایه وارد می‌شود.
+  <br><br>
+  <strong>۲.</strong> بیشتر از عمق دفتر نمی‌گذارد.
+  <br><br>
+  <strong>۳.</strong> دلیل <em>نخریدن</em> را هم ثبت می‌کند. «۲ از ۶ معامله شد»
+  تنهایی چیزی نمی‌گوید؛ «۱ تا چون پنجره کوتاه بود، ۱ تا چون پول نبود» دو مشکل
+  متفاوت با راه‌حل‌های متفاوت است.
+</div></div>
+
+<div class="panel">
+  <h2>اجراها</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>#</th><th>برچسب</th><th>زمان</th>
+        <th>پنجره</th><th>معامله</th><th>سرمایه‌ی اولیه</th>
+        <th>قفل‌شده</th><th>کارمزد</th><th>سود</th><th>بازده</th>
+      </tr></thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td class="num"><a href="{{ url_for('paper_run', run_id=r.id) }}">{{ r.id }}</a></td>
+          <td class="wrap">{{ r.label or '—' }}</td>
+          <td title="{{ r.started_at }}">{{ r.started_at|ago }}</td>
+          <td class="num">{{ r.windows_seen }}</td>
+          <td class="num {{ 'good' if r.trades else '' }}">{{ r.trades }}</td>
+          <td class="num">{{ r.start_cash|money }}</td>
+          <td class="num">{{ r.locked|money }}</td>
+          <td class="num" style="color:var(--warn)">{{ r.fees_paid|money(2) }}</td>
+          <td class="num {{ 'good' if r.realised_profit and r.realised_profit > 0 else '' }}">
+            {{ r.realised_profit|money(2) }}</td>
+          <td class="num {{ 'good' if r.realised_profit and r.realised_profit > 0 else '' }}">
+            {% if r.start_cash %}{{ (r.realised_profit / r.start_cash)|pct(2) }}{% else %}—{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">
+          <div class="big">هنوز اجرایی ثبت نشده است.</div>
+          <div style="max-width:600px;margin:12px auto 0;line-height:1.9;text-align:right">
+            کیف پول از خط فرمان اجرا می‌شود، چون یک ابزار تحلیل است نه سرویس:
+            <br><br>
+            <span class="num">python paper.py</span>
+            <br>
+            <span class="num">python paper.py --cash 5000 --min-window 10</span>
+            <br>
+            <span class="num">python paper.py --compare</span>
+            <br><br>
+            آخری همان تاریخچه را یک‌بار با فیلترها و یک‌بار بدون هیچ فیلتری اجرا
+            می‌کند. اگر حالت فیلترشده بهتر نباشد، فیلترها بیش از آنچه صرفه‌جویی
+            می‌کنند هزینه دارند.
+          </div>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

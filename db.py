@@ -267,6 +267,12 @@ CREATE TABLE IF NOT EXISTS edge_windows (
     duration_ms INTEGER,
     ticks INTEGER DEFAULT 0,
 
+    -- When the market itself settles. A basket pays out then, and only
+    -- then does its capital come back — so without this a replay cannot
+    -- tell a wallet that traded once from one that recycled the same
+    -- money twenty times.
+    end_date TEXT,
+
     opened_edge REAL,
     best_edge REAL,                     -- highest edge reached
     best_sum_asks REAL,                 -- and the basket price there
@@ -307,6 +313,108 @@ CREATE TABLE IF NOT EXISTS edge_ticks (
 
     FOREIGN KEY (window_id) REFERENCES edge_windows(id)
 );
+-- Paper trading: replaying recorded windows with fake money.
+--
+-- One run per set of parameters, so the same history can be replayed with
+-- a different edge floor or wallet size and the two compared. Without the
+-- parameters stored beside the result, a P&L number is unreadable a week
+-- later.
+CREATE TABLE IF NOT EXISTS paper_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    label TEXT,
+    params TEXT,                        -- JSON: every knob this run used
+
+    windows_seen INTEGER DEFAULT 0,
+    trades INTEGER DEFAULT 0,
+    skipped INTEGER DEFAULT 0,
+
+    start_cash REAL,
+    end_cash REAL,                      -- cash not locked in open baskets
+    locked REAL,                        -- capital sitting in open positions
+    realised_profit REAL,               -- hold-to-resolution, locked at buy
+    optimistic_profit REAL,             -- if every basket could be sold back
+    fees_paid REAL,                     -- what the exchange took, in total
+    wins INTEGER DEFAULT 0,
+    losses INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_prun_time ON paper_runs(started_at);
+
+-- One row per window per run — taken or not, always with the reason.
+--
+-- The skips are the point as much as the trades. "We saw 40 windows and
+-- traded 3" is only useful next to why the other 37 were refused: an
+-- edge too thin and a wallet too small are different problems with
+-- different fixes.
+CREATE TABLE IF NOT EXISTS paper_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    window_id INTEGER NOT NULL,
+    decided_at TEXT NOT NULL,
+
+    event_slug TEXT,
+    event_title TEXT,
+    side TEXT,
+    num_outcomes INTEGER,
+    payout REAL,
+    fee_rate REAL,
+
+    taken INTEGER NOT NULL,             -- 1 traded, 0 skipped
+    reason TEXT NOT NULL,               -- why, either way
+
+    -- what the window offered
+    window_ms INTEGER,
+    best_edge REAL,
+    best_sum_asks REAL,
+
+    -- what the trade actually got, at the tick latency allowed
+    entry_ms INTEGER,                   -- ms after the window opened
+    entry_sum_asks REAL,
+    entry_edge REAL,
+    shares REAL,
+    capital REAL,
+    fee REAL,                           -- paid up front, returned at settlement
+    profit REAL,                        -- locked at purchase, net of the fee
+    fillable_capital REAL,              -- what the book could have taken
+
+    FOREIGN KEY (run_id) REFERENCES paper_runs(id)
+);
+-- Every movement of money, in the order it happened.
+--
+-- paper_decisions says what was decided about each window;
+-- this says what the balance actually did. Two rows per basket — the
+-- purchase and, later, the settlement — so "on what date did the wallet
+-- reach what number" is a question the table answers by being read top to
+-- bottom, rather than one that has to be reconstructed.
+CREATE TABLE IF NOT EXISTS paper_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER NOT NULL,
+    seq INTEGER NOT NULL,               -- order within the run
+    at TEXT,                            -- the simulated date, not wall clock
+    kind TEXT NOT NULL,                 -- 'buy' | 'settle'
+
+    window_id INTEGER,
+    event_slug TEXT,
+    event_title TEXT,
+
+    -- signed: negative leaving the wallet, positive returning
+    amount REAL NOT NULL,
+    capital REAL,
+    fee REAL,
+    profit REAL,
+
+    balance_after REAL,                 -- spendable cash
+    locked_after REAL,                  -- money inside open baskets
+    equity_after REAL,                  -- cash + locked, the real total
+
+    FOREIGN KEY (run_id) REFERENCES paper_runs(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pled_run ON paper_ledger(run_id, seq);
+
+CREATE INDEX IF NOT EXISTS idx_pdec_run ON paper_decisions(run_id, taken);
+CREATE INDEX IF NOT EXISTS idx_pdec_reason ON paper_decisions(reason);
+
 CREATE INDEX IF NOT EXISTS idx_tick_window ON edge_ticks(window_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_tick_ts ON edge_ticks(ts_ms);
 
@@ -334,6 +442,16 @@ def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
     db.execute("PRAGMA foreign_keys=ON")
+
+    # WAL lets readers run during a write, but still allows only one
+    # writer, and SQLite's default on meeting a held lock is to fail
+    # immediately rather than wait. Three processes now write here — the
+    # monitor commits ~2100 verdict rows in one batch, the live engine
+    # appends ticks continuously, and paper.py records a replay — so
+    # without this a scan landing at the wrong moment is a bare "database
+    # is locked". Ten seconds outlasts the longest batch by a wide margin
+    # while still failing visibly if something is genuinely stuck.
+    db.execute("PRAGMA busy_timeout=10000")
 
     db.executescript(SCHEMA)
     # metrics owns its own tables; keeping the DDL next to the code that
@@ -365,6 +483,13 @@ MIGRATIONS = [
     ("opportunities", "top_shares", "REAL"),
     ("opportunities", "top_capital", "REAL"),
     ("opportunities", "top_profit", "REAL"),
+    ("edge_windows", "end_date", "TEXT"),
+    # A paper database created before fees and win/loss were tracked keeps
+    # working; the older runs simply carry NULLs for what was not measured.
+    ("paper_runs", "fees_paid", "REAL"),
+    ("paper_runs", "wins", "INTEGER DEFAULT 0"),
+    ("paper_runs", "losses", "INTEGER DEFAULT 0"),
+    ("paper_decisions", "fee", "REAL"),
 ]
 
 
@@ -536,13 +661,13 @@ def open_edge_window(db: sqlite3.Connection, w: dict) -> int:
     cur = db.execute("""
         INSERT INTO edge_windows (
             event_slug, event_title, side, num_outcomes, fee_rate, payout,
-            opened_at, opened_edge, best_edge, best_sum_asks, best_at,
-            best_capital, best_profit, crossed, url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            opened_at, end_date, opened_edge, best_edge, best_sum_asks,
+            best_at, best_capital, best_profit, crossed, url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         w["event_slug"], w.get("event_title"), w.get("side"),
         w.get("num_outcomes"), w.get("fee_rate"), w.get("payout"),
-        w["opened_at"], w.get("edge"), w.get("edge"),
+        w["opened_at"], w.get("end_date"), w.get("edge"), w.get("edge"),
         w.get("sum_best_asks"), w["opened_at"],
         w.get("fillable_capital"), w.get("fillable_profit"),
         int(bool(w.get("crossed"))), w.get("url"),

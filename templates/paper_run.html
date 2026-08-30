@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% import "_sort.html" as sortui %}
+{% block title %}اجرای #{{ run.id }} — کیف پول کاغذی{% endblock %}
+{% block body %}
+
+<h1>اجرای #{{ run.id }}{% if run.label %} — {{ run.label }}{% endif %}</h1>
+<p class="sub">{{ run.started_at|ago }} ·
+  <a href="{{ url_for('paper_ledger', run_id=run.id) }}">دفتر کیف</a> ·
+  <a href="{{ url_for('paper_runs') }}">همه‌ی اجراها</a></p>
+
+<div class="cards">
+  <div class="card"><div class="k">سرمایه‌ی اولیه</div>
+    <div class="v num">{{ run.start_cash|money }}</div></div>
+  <div class="card"><div class="k">سود قفل‌شده</div>
+    <div class="v num {{ 'good' if run.realised_profit and run.realised_profit > 0 else '' }}">{{ run.realised_profit|money(2) }}</div>
+    <div class="note">{% if run.start_cash %}{{ (run.realised_profit / run.start_cash)|pct(2) }} بازده{% endif %}</div></div>
+  <div class="card"><div class="k">کارمزد پرداختی</div>
+    <div class="v num {{ 'warn' if run.fees_paid else '' }}">{{ run.fees_paid|money(2) }}</div>
+    <div class="note">
+      {% if run.fees_paid and run.realised_profit is not none %}
+        {{ (run.fees_paid / (run.realised_profit + run.fees_paid) * 100)|round(1) }}٪ از سود ناخالص
+      {% else %}—{% endif %}</div></div>
+  <div class="card"><div class="k">سرمایه‌ی قفل‌شده</div>
+    <div class="v num">{{ run.locked|money }}</div>
+    <div class="note">تا تسویه آزاد نمی‌شود</div></div>
+  <div class="card"><div class="k">نقد باقی‌مانده</div>
+    <div class="v num">{{ run.end_cash|money }}</div></div>
+  <div class="card"><div class="k">پنجره‌های بررسی‌شده</div>
+    <div class="v num">{{ run.windows_seen }}</div></div>
+  <div class="card"><div class="k">معامله‌شده</div>
+    <div class="v num {{ 'good' if run.trades else '' }}">{{ run.trades }}</div>
+    <div class="note">{{ run.skipped }} رد شد</div></div>
+</div>
+
+{% if params %}
+<div class="panel">
+  <h2>پارامترهای این اجرا</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0">
+      بدون این‌ها، یک عدد سود یک هفته بعد قابل خواندن نیست.
+    </p>
+    <div class="rangegrid">
+      {% for key, value in params.items() %}
+        <div class="rangecol">
+          <label>{{ key }}</label>
+          <div class="num">{{ value }}</div>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>چه شد و چرا</h2>
+  <div class="body">
+    {% set biggest = reasons | map(attribute='n') | max if reasons else 1 %}
+    {% for r in reasons %}
+      <div class="bar-row">
+        <div class="label">
+          {% if r.reason == 'taken' %}<span class="tag good">{{ labels.get(r.reason, r.reason) }}</span>
+          {% else %}{{ labels.get(r.reason, r.reason) }}{% endif %}
+        </div>
+        <div class="track"><div class="fill"
+          style="width:{{ (r.n / biggest * 100)|round(1) }}%;
+                 {% if r.reason == 'taken' %}background:var(--good){% endif %}"></div></div>
+        <div class="n num">{{ r.n }}{% if r.profit %} · {{ r.profit|money(2) }}{% endif %}</div>
+      </div>
+    {% endfor %}
+    {% if run.trades == 0 %}
+      <p class="sub" style="margin-top:16px">
+        هیچ معامله‌ای انجام نشد. اگر بیشتر دلایل «پنجره کوتاه» است، محدودیت از
+        بازار است؛ اگر «پول کافی نبود»، از اندازه‌ی کیف؛ و اگر «لبه تا لحظه‌ی
+        ورود از بین رفت»، یعنی پنجره‌ها واقعی بودند ولی برای سرعت ما بیش از حد
+        تند.
+      </p>
+    {% endif %}
+  </div>
+</div>
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="taken">نمایش</label>
+    <select id="taken" name="taken" onchange="this.form.submit()">
+      <option value="1" {{ 'selected' if taken == '1' }}>فقط معامله‌شده‌ها</option>
+      <option value="0" {{ 'selected' if taken == '0' }}>فقط ردشده‌ها</option>
+      <option value=""  {{ 'selected' if taken not in ['0','1'] }}>همه</option>
+    </select>
+  </div>
+</form>
+
+{{ sortui.ranges(sortstate) }}
+
+<div class="panel">
+  <h2>{{ '{:,}'.format(total) }} ردیف</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>نتیجه</th>
+        {{ sortui.th('window_ms',  'طول پنجره', sortstate) }}
+        {{ sortui.th('entry_ms',   'تأخیر ورود', sortstate) }}
+        {{ sortui.th('best_edge',  'بهترین لبه', sortstate) }}
+        {{ sortui.th('entry_edge', 'لبه‌ی ورود', sortstate) }}
+        {{ sortui.th('fillable_capital', 'عمق', sortstate) }}
+        {{ sortui.th('capital',    'سرمایه', sortstate) }}
+        {{ sortui.th('fee',        'کارمزد', sortstate) }}
+        {{ sortui.th('profit',     'سود', sortstate) }}
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        <tr>
+          <td class="wrap">
+            <a href="{{ url_for('window_detail', window_id=r.window_id) }}">{{ r.event_title or r.event_slug }}</a>
+            <span class="tag">{{ r.num_outcomes }} پا</span>
+          </td>
+          <td>
+            {% if r.taken %}<span class="tag good">خرید</span>
+            {% else %}<span class="tag" title="{{ labels.get(r.reason, r.reason) }}">{{ labels.get(r.reason, r.reason) }}</span>{% endif %}
+          </td>
+          <td class="num">{{ r.window_ms|duration }}</td>
+          <td class="num">{{ r.entry_ms|duration }}</td>
+          <td class="num">{{ r.best_edge|pct(3) }}</td>
+          <td class="num {{ 'good' if r.entry_edge and r.entry_edge > 0 else '' }}">{{ r.entry_edge|pct(3) }}</td>
+          <td class="num">{{ r.fillable_capital|money(0) }}</td>
+          <td class="num">{{ r.capital|money(0) }}</td>
+          <td class="num" style="color:var(--warn)">{{ r.fee|money(2) }}</td>
+          <td class="num {{ 'good' if r.profit and r.profit > 0 else '' }}">{{ r.profit|money(2) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">چیزی با این فیلتر نیست.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="body" style="border-top:1px solid var(--border);color:var(--muted);font-size:13px;line-height:1.9">
+    ستون <strong>بهترین لبه</strong> بهترین لحظه‌ی پنجره است و
+    <strong>لبه‌ی ورود</strong> آن چیزی که واقعاً گیرمان می‌آمد. فاصله‌ی بین این دو،
+    هزینه‌ی تأخیر اجراست — و دلیل اینکه بعضی پنجره‌های به‌ظاهر خوب رد شده‌اند.
+    <br>
+    ستون <strong>سود</strong> از قبل کارمزد را کم کرده است؛ ستون کارمزد کنارش
+    نشان می‌دهد چقدر از سود ناخالص را همان کارمزد برده.
+  </div>
+</div>
+
+{% include "_pager.html" %}
+
+{% endblock %}

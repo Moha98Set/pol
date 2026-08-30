@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}دفتر کیف — اجرای #{{ run.id }}{% endblock %}
+{% block body %}
+
+<h1>دفتر کیف — اجرای #{{ run.id }}</h1>
+<p class="sub">
+  هر حرکت پول، به ترتیب وقوع.
+  <a href="{{ url_for('paper_run', run_id=run.id) }}">بازگشت به خلاصه‌ی اجرا</a>
+</p>
+
+<div class="cards">
+  <div class="card"><div class="k">سرمایه‌ی اولیه</div>
+    <div class="v num">{{ run.start_cash|money }}</div></div>
+  <div class="card"><div class="k">دارایی پایانی</div>
+    {% set equity = (run.end_cash or 0) + (run.locked or 0) %}
+    <div class="v num {{ 'good' if equity > run.start_cash else '' }}">{{ equity|money(2) }}</div>
+    <div class="note">نقد {{ run.end_cash|money(2) }} + قفل {{ run.locked|money(2) }}</div></div>
+  <div class="card"><div class="k">سودده / زیان‌ده</div>
+    <div class="v num">{{ run.wins or 0 }} / {{ run.losses or 0 }}</div>
+    <div class="note">
+      {% if (run.wins or 0) + (run.losses or 0) %}
+        نرخ موفقیت {{ ((run.wins or 0) / ((run.wins or 0) + (run.losses or 0)) * 100)|round(0)|int }}٪
+      {% else %}هنوز تسویه‌ای نشده{% endif %}</div></div>
+  <div class="card"><div class="k">کارمزد پرداختی</div>
+    <div class="v num warn">{{ run.fees_paid|money(2) }}</div></div>
+</div>
+
+{% if (run.wins or 0) and not (run.losses or 0) %}
+<div class="panel"><div class="body" style="line-height:1.95">
+  <strong>نرخ موفقیت ۱۰۰٪ را نشانه‌ی بی‌خطر بودن نگیرید.</strong>
+  قاعده‌ی ورود فقط لبه‌ی مثبت می‌خرد و سود در همان لحظه‌ی خرید قفل می‌شود، پس
+  در این مدل زیان ساختاراً ممکن نیست.
+  <br><br>
+  زیان واقعی از دو جایی می‌آید که این شبیه‌سازی نمی‌بیند: <strong>پر نشدن یکی
+  از پاها</strong> و ماندن با موقعیتی که پوشش ندارد، و <strong>بازاری که واقعاً
+  انحصار متقابل نداشته</strong> و پرداخت تضمینی‌اش آن چیزی نیست که فرض کردیم.
+  هیچ‌کدام از داده‌ی ثبت‌شده قابل استخراج نیستند.
+</div></div>
+{% endif %}
+
+{% if curve|length > 1 %}
+<div class="panel">
+  <h2>روند دارایی</h2>
+  <div class="body">
+    {% set vals = curve | map(attribute='equity_after') | list %}
+    {% set lo = [vals|min, run.start_cash]|min %}
+    {% set hi = [vals|max, run.start_cash]|max %}
+    {% set span = (hi - lo) if (hi - lo) > 0 else 1 %}
+    {% set n = curve|length %}
+    {% set start_y = 150 - ((run.start_cash - lo) / span * 130) %}
+
+    <svg viewBox="0 0 800 175" preserveAspectRatio="none"
+         style="display:block;width:100%;height:175px" role="img"
+         aria-label="روند دارایی کیف">
+      <line x1="0" y1="{{ start_y }}" x2="800" y2="{{ start_y }}"
+            stroke="var(--muted)" stroke-width="1" stroke-dasharray="5 4" opacity="0.6"/>
+      <text x="6" y="{{ start_y - 6 }}" fill="var(--muted)" font-size="11"
+            direction="ltr" text-anchor="start">سرمایه‌ی اولیه</text>
+      <polyline fill="none" stroke="var(--good)" stroke-width="2.5"
+        points="{% for r in curve %}{{ loop.index0 * (800 / (n - 1)) }},{{ 150 - ((r.equity_after - lo) / span * 130) }} {% endfor %}"/>
+    </svg>
+    <div class="axis">
+      <span class="num">{{ (curve[0].at or '')[:10] }}</span>
+      <span>از <span class="num">{{ run.start_cash|money(2) }}</span>
+            به <span class="num {{ 'good' if vals[-1] > run.start_cash else '' }}">{{ vals[-1]|money(2) }}</span></span>
+      <span class="num">{{ (curve[-1].at or '')[:10] }}</span>
+    </div>
+    <p class="sub" style="margin-top:14px">
+      خرید پول را از نقد به داخل سبد می‌برد و چیزی نمی‌سازد؛ فقط تسویه دارایی را
+      بالا می‌برد. پس هر پله در این خط، یک بازار است که نتیجه‌اش معلوم شده.
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h2>{{ '{:,}'.format(total) }} حرکت</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>#</th><th>تاریخ</th><th>رویداد</th><th>بازار</th>
+        <th>تغییر</th><th>سرمایه</th><th>کارمزد</th><th>سود</th>
+        <th>نقد</th><th>قفل‌شده</th><th>کل دارایی</th>
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        <tr>
+          <td class="num">{{ r.seq }}</td>
+          <td class="num" title="{{ r.at }}">{{ (r.at or '')[:10] }}</td>
+          <td>{% if r.kind == 'buy' %}<span class="tag">خرید</span>
+              {% else %}<span class="tag good">تسویه</span>{% endif %}</td>
+          <td class="wrap">
+            {% if r.window_id %}<a href="{{ url_for('window_detail', window_id=r.window_id) }}">{{ r.event_title or r.event_slug }}</a>
+            {% else %}{{ r.event_title or '—' }}{% endif %}</td>
+          <td class="num {{ 'good' if r.amount > 0 else 'bad' }}">
+            {{ '+' if r.amount > 0 }}{{ r.amount|money(2) }}</td>
+          <td class="num">{{ r.capital|money(2) }}</td>
+          <td class="num" style="color:var(--warn)">{{ r.fee|money(2) }}</td>
+          <td class="num {{ 'good' if r.profit and r.profit > 0 else '' }}">{{ r.profit|money(2) }}</td>
+          <td class="num">{{ r.balance_after|money(2) }}</td>
+          <td class="num">{{ r.locked_after|money(2) }}</td>
+          <td class="num"><strong>{{ r.equity_after|money(2) }}</strong></td>
+        </tr>
+        {% else %}
+        <tr><td colspan="11" class="empty">این اجرا حرکتی در کیف نداشت.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pager.html" %}
+
+{% endblock %}

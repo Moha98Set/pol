@@ -277,6 +277,39 @@ LOG_FILE = os.getenv("LOG_FILE", "")
 
 
 # =====================================================================
+# Paper wallet — replaying recorded windows with fake money
+# =====================================================================
+# Answers "would this have made money", which no other part of the system
+# can. Replay rather than live, because the question is statistical: the
+# same history has to be runnable again with different parameters, and a
+# live run cannot be repeated.
+
+PAPER_START_CASH = _value("PAPER_START_CASH", 1000.0)
+
+# A window has to last at least this long to be worth entering. The floor
+# is execution latency: roughly 250ms before a signal is believed, ~150ms
+# to refetch the books, then ~300ms per leg placed in sequence. Below a
+# couple of seconds nothing is reachable at all.
+PAPER_MIN_WINDOW_MS = _value("PAPER_MIN_WINDOW_MS", 5000, int)
+
+# What entering actually costs in time, and therefore which tick the
+# simulation is allowed to buy at. Buying at the window's best tick would
+# be a lie — that price is gone before an order reaches the exchange.
+PAPER_LATENCY_BASE_MS = _value("PAPER_LATENCY_BASE_MS", 400, int)
+PAPER_LATENCY_PER_LEG_MS = _value("PAPER_LATENCY_PER_LEG_MS", 300, int)
+
+PAPER_MIN_EDGE = _value("PAPER_MIN_EDGE", 0.003)
+PAPER_MAX_PER_TRADE = _value("PAPER_MAX_PER_TRADE", 250.0)
+
+# Below this the trade is not worth the capital lock, whatever the edge.
+PAPER_MIN_CAPITAL = _value("PAPER_MIN_CAPITAL", 20.0)
+
+# More legs means more sequential orders and more ways to end up holding
+# an unhedged half-basket.
+PAPER_MAX_LEGS = _value("PAPER_MAX_LEGS", 12, int)
+
+
+# =====================================================================
 # Alerts
 # =====================================================================
 # Opportunities are rare and brief. Without a push, the dashboard becomes

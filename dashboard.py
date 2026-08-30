@@ -1000,6 +1000,113 @@ def distribution():
 
 
 # =====================================================================
+# Paper wallet
+# =====================================================================
+
+
+@app.route("/paper")
+@login_required
+def paper_runs():
+    if not table_exists("paper_runs"):
+        return render_template("no_paper.html")
+
+    runs = rows("""
+        SELECT * FROM paper_runs ORDER BY id DESC LIMIT 40
+    """)
+    return render_template("paper.html", runs=runs)
+
+
+@app.route("/paper/<int:run_id>")
+@login_required
+def paper_run(run_id):
+    run = one("SELECT * FROM paper_runs WHERE id = ?", (run_id,))
+    if run is None:
+        abort(404)
+
+    page = max(1, request.args.get("page", 1, type=int))
+    taken = request.args.get("taken", "1")
+    where = " WHERE run_id = ?"
+    params = [run_id]
+    if taken in ("0", "1"):
+        where += " AND taken = ?"
+        params.append(int(taken))
+
+    order_by, extra, extra_params, sortstate = sort_and_filter(
+        PAPER_COLS, "profit")
+    if extra:
+        where += " AND " + " AND ".join(extra)
+        params = [*params, *extra_params]
+
+    total = one(f"SELECT COUNT(*) c FROM paper_decisions{where}",
+                params)["c"]
+    items = rows(f"""
+        SELECT * FROM paper_decisions{where}
+        ORDER BY {order_by} LIMIT ? OFFSET ?
+    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
+
+    reasons = rows("""
+        SELECT reason, COUNT(*) n,
+               COALESCE(SUM(capital), 0) capital,
+               COALESCE(SUM(profit), 0) profit
+        FROM paper_decisions WHERE run_id = ?
+        GROUP BY reason ORDER BY n DESC
+    """, (run_id,))
+
+    return render_template(
+        "paper_run.html", run=run, items=items, total=total, page=page,
+        pages=_pages(total), reasons=reasons, taken=taken,
+        sortstate=sortstate, params=fromjson(run["params"]) or {},
+        labels=_paper_labels())
+
+
+@app.route("/paper/<int:run_id>/ledger")
+@login_required
+def paper_ledger(run_id):
+    run = one("SELECT * FROM paper_runs WHERE id = ?", (run_id,))
+    if run is None:
+        abort(404)
+
+    page = max(1, request.args.get("page", 1, type=int))
+    total = one("SELECT COUNT(*) c FROM paper_ledger WHERE run_id = ?",
+                (run_id,))["c"]
+    items = rows("""
+        SELECT * FROM paper_ledger WHERE run_id = ?
+        ORDER BY seq LIMIT ? OFFSET ?
+    """, (run_id, PAGE_SIZE, (page - 1) * PAGE_SIZE))
+
+    # The equity curve, thinned to something a small chart can draw. Every
+    # movement is in the table below; this is the shape of them.
+    curve = rows("""
+        SELECT seq, at, equity_after, balance_after, kind
+        FROM paper_ledger WHERE run_id = ? ORDER BY seq
+    """, (run_id,))
+    if len(curve) > 120:
+        step = len(curve) // 120 + 1
+        curve = curve[::step] + [curve[-1]]
+
+    return render_template("paper_ledger.html", run=run, items=items,
+                           total=total, page=page, pages=_pages(total),
+                           curve=curve)
+
+
+PAPER_COLS = {
+    "window_ms":     Col("window_ms", "طول پنجره", "duration", 1000, "1"),
+    "entry_ms":      Col("entry_ms", "تأخیر ورود", "duration", 1000, "0.5"),
+    "best_edge":     Col("best_edge", "بهترین لبه", "percent", 0.01, "0.001"),
+    "entry_edge":    Col("entry_edge", "لبه‌ی ورود", "percent", 0.01, "0.001"),
+    "capital":       Col("capital", "سرمایه", "money", step="10"),
+    "fee":           Col("fee", "کارمزد", "money", step="0.5"),
+    "profit":        Col("profit", "سود", "money", step="0.5"),
+    "fillable_capital": Col("fillable_capital", "عمق", "money", step="10"),
+}
+
+
+def _paper_labels():
+    import paper
+    return paper.SKIP_LABELS
+
+
+# =====================================================================
 # Funnel
 # =====================================================================
 
