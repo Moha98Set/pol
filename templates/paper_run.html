@@ -32,6 +32,39 @@
     <div class="note">{{ run.skipped }} رد شد</div></div>
 </div>
 
+<div class="panel">
+  <h2>تفکیک</h2>
+  <div class="scroll">
+    <table>
+      <tbody>
+        <tr><td>معامله‌ی سودده</td>
+            <td class="num good">{{ run.wins or 0 }}</td>
+            <td>مجموع سود</td>
+            <td class="num good">{{ run.gross_profit|money(2) }}</td></tr>
+        <tr><td>معامله‌ی زیان‌ده</td>
+            <td class="num {{ 'bad' if run.losses else '' }}">{{ run.losses or 0 }}</td>
+            <td>مجموع ضرر</td>
+            <td class="num {{ 'bad' if run.gross_loss else '' }}">{{ run.gross_loss|money(2) }}</td></tr>
+        <tr><td><strong>سود خالص</strong></td><td></td><td></td>
+            <td class="num {{ 'good' if run.realised_profit and run.realised_profit > 0 else '' }}">
+              <strong>{{ run.realised_profit|money(2) }}</strong></td></tr>
+        <tr><td>کارمزد پرداختی</td><td></td>
+            <td>{% set g = (run.realised_profit or 0) + (run.fees_paid or 0) %}
+                {% if g %}{{ (run.fees_paid / g * 100)|round(1) }}٪ از ناخالص{% endif %}</td>
+            <td class="num" style="color:var(--warn)">{{ run.fees_paid|money(2) }}</td></tr>
+        <tr><td colspan="4" style="height:6px;padding:0"></td></tr>
+        <tr><td>کیف خالص (نقد)</td><td></td><td>قابل استفاده</td>
+            <td class="num">{{ run.end_cash|money(2) }}</td></tr>
+        <tr><td>قفل‌شده در بازارها</td><td></td>
+            <td>{{ run.trades - (run.wins or 0) - (run.losses or 0) if false else '' }}تسویه‌نشده</td>
+            <td class="num">{{ run.locked|money(2) }}</td></tr>
+        <tr><td><strong>کل کیف (ناخالص)</strong></td><td></td><td>نقد + قفل‌شده</td>
+            <td class="num"><strong>{{ ((run.end_cash or 0) + (run.locked or 0))|money(2) }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 {% if params %}
 <div class="panel">
   <h2>پارامترهای این اجرا</h2>

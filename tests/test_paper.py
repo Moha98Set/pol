@@ -606,18 +606,71 @@ def test_equity_only_grows_when_a_basket_settles(database):
     assert first_buy["equity_after"] == pytest.approx(1000)
 
 
-def test_wins_and_losses_are_counted_at_settlement(database):
-    add_dated_window(database, slug="a", opened="2026-01-01T00:00:00+00:00",
+def test_an_outcome_is_known_at_purchase_not_at_settlement(database):
+    """
+    Profit is fixed the moment the basket is bought, so a trade counts as
+    a winner immediately. Settlement is a cash-flow event, not a verdict —
+    counting there would leave every open position uncategorised.
+    """
+    add_dated_window(database, slug="settles",
+                     opened="2026-01-01T00:00:00+00:00",
                      end_date="2026-01-02T00:00:00+00:00")
-    add_dated_window(database, slug="clock", opened="2026-06-01T00:00:00+00:00",
+    add_dated_window(database, slug="still_open",
+                     opened="2026-06-01T00:00:00+00:00",
                      end_date="2099-01-01T00:00:00+00:00",
                      start_ms=1_700_000_100_000)
 
     summary = paper.replay(database, cash=1000, min_window_ms=1000,
                            max_per_trade=250, min_capital=20)
 
-    # every entry has a positive edge by construction, so nothing loses —
-    # the real loss modes (a leg that does not fill, a basket that is not
-    # actually exclusive) are outside what the recording can show
-    assert summary["wins"] == 1
+    # both traded; only one settled
+    assert summary["trades"] == 2
+    assert summary["settled"] == 1
+    assert summary["wins"] == 2
     assert summary["losses"] == 0
+
+
+def test_the_winning_and_losing_totals_add_up_to_the_net(database):
+    """
+    A bare "100% success" hides the size of what was won. The counts and
+    the sums are reported separately so a run of many tiny wins reads
+    differently from one large one.
+    """
+    add_window(database, slug="a", depth=100_000.0, seconds=12, edge=0.010)
+    add_window(database, slug="b", depth=100_000.0, seconds=12, edge=0.020,
+               start_ms=1_700_000_100_000)
+
+    summary = paper.replay(database, cash=1000, min_window_ms=1000,
+                           max_per_trade=250, min_capital=20)
+
+    assert summary["wins"] == 2
+    assert summary["profit_sum"] > 0
+    assert summary["loss_sum"] == 0
+    assert summary["realised"] == pytest.approx(
+        summary["profit_sum"] + summary["loss_sum"])
+
+
+def test_the_totals_are_stored_on_the_run(database):
+    add_window(database, depth=100_000.0, seconds=12)
+    summary = paper.replay(database, cash=1000, min_window_ms=1000,
+                           max_per_trade=250, min_capital=20)
+
+    run = database.execute("SELECT * FROM paper_runs WHERE id = ?",
+                           (summary["run_id"],)).fetchone()
+    assert run["gross_profit"] == pytest.approx(summary["profit_sum"])
+    assert run["gross_loss"] == pytest.approx(summary["loss_sum"])
+    assert run["wins"] == summary["wins"]
+
+
+def test_gross_wallet_is_cash_plus_locked(database):
+    """
+    The two numbers answer different questions: cash is what can be spent
+    now, gross is what the wallet is actually worth.
+    """
+    add_window(database, depth=100_000.0, seconds=12)
+    summary = paper.replay(database, cash=1000, min_window_ms=1000,
+                           max_per_trade=250, min_capital=20)
+
+    assert summary["equity"] == pytest.approx(
+        summary["cash"] + summary["locked"])
+    assert summary["cash"] < summary["equity"]      # something is locked

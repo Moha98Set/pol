@@ -15,21 +15,21 @@
     {% set equity = (run.end_cash or 0) + (run.locked or 0) %}
     <div class="v num {{ 'good' if equity > run.start_cash else '' }}">{{ equity|money(2) }}</div>
     <div class="note">نقد {{ run.end_cash|money(2) }} + قفل {{ run.locked|money(2) }}</div></div>
-  <div class="card"><div class="k">سودده / زیان‌ده</div>
-    <div class="v num">{{ run.wins or 0 }} / {{ run.losses or 0 }}</div>
-    <div class="note">
-      {% if (run.wins or 0) + (run.losses or 0) %}
-        نرخ موفقیت {{ ((run.wins or 0) / ((run.wins or 0) + (run.losses or 0)) * 100)|round(0)|int }}٪
-      {% else %}هنوز تسویه‌ای نشده{% endif %}</div></div>
+  <div class="card"><div class="k">معامله‌ی سودده</div>
+    <div class="v num good">{{ run.wins or 0 }}</div>
+    <div class="note">مجموع سود {{ run.gross_profit|money(2) }}</div></div>
+  <div class="card"><div class="k">معامله‌ی زیان‌ده</div>
+    <div class="v num {{ 'bad' if run.losses else '' }}">{{ run.losses or 0 }}</div>
+    <div class="note">مجموع ضرر {{ run.gross_loss|money(2) }}</div></div>
   <div class="card"><div class="k">کارمزد پرداختی</div>
     <div class="v num warn">{{ run.fees_paid|money(2) }}</div></div>
 </div>
 
 {% if (run.wins or 0) and not (run.losses or 0) %}
 <div class="panel"><div class="body" style="line-height:1.95">
-  <strong>نرخ موفقیت ۱۰۰٪ را نشانه‌ی بی‌خطر بودن نگیرید.</strong>
+  <strong>صفر معامله‌ی زیان‌ده ساختاری است، نه دستاورد.</strong>
   قاعده‌ی ورود فقط لبه‌ی مثبت می‌خرد و سود در همان لحظه‌ی خرید قفل می‌شود، پس
-  در این مدل زیان ساختاراً ممکن نیست.
+  در این مدل زیان ممکن نیست.
   <br><br>
   زیان واقعی از دو جایی می‌آید که این شبیه‌سازی نمی‌بیند: <strong>پر نشدن یکی
   از پاها</strong> و ماندن با موقعیتی که پوشش ندارد، و <strong>بازاری که واقعاً

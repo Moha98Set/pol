@@ -337,7 +337,9 @@ CREATE TABLE IF NOT EXISTS paper_runs (
     optimistic_profit REAL,             -- if every basket could be sold back
     fees_paid REAL,                     -- what the exchange took, in total
     wins INTEGER DEFAULT 0,
-    losses INTEGER DEFAULT 0
+    losses INTEGER DEFAULT 0,
+    gross_profit REAL,                  -- the winners, added up
+    gross_loss REAL                     -- the losers, as a negative number
 );
 CREATE INDEX IF NOT EXISTS idx_prun_time ON paper_runs(started_at);
 
@@ -489,6 +491,8 @@ MIGRATIONS = [
     ("paper_runs", "fees_paid", "REAL"),
     ("paper_runs", "wins", "INTEGER DEFAULT 0"),
     ("paper_runs", "losses", "INTEGER DEFAULT 0"),
+    ("paper_runs", "gross_profit", "REAL"),
+    ("paper_runs", "gross_loss", "REAL"),
     ("paper_decisions", "fee", "REAL"),
 ]
 

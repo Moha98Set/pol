@@ -110,8 +110,13 @@ class Wallet:
         self.optimistic = 0.0
         self.settled = 0           # baskets that paid out during the run
         self.unsettled = 0         # still holding at the end
+        # Counted at purchase, not at settlement: the profit is fixed the
+        # moment the basket is bought, so a trade's outcome is known then.
+        # Settlement is a cash-flow event, not a verdict.
         self.wins = 0
         self.losses = 0
+        self.profit_sum = 0.0      # the winners, added up
+        self.loss_sum = 0.0        # the losers, as a negative number
         # (settles_at, capital, fee, profit, window)
         self.open_positions = []
         # every movement of money, in order
@@ -150,6 +155,12 @@ class Wallet:
         self.realised += profit
         self.fees += fee
         self.optimistic += optimistic
+        if profit >= 0:
+            self.wins += 1
+            self.profit_sum += profit
+        else:
+            self.losses += 1
+            self.loss_sum += profit
         self.open_positions.append((settles_at, capital, fee, profit, window))
         self._record("buy", -(capital + fee), at, window,
                      capital=capital, fee=fee, profit=profit)
@@ -169,10 +180,6 @@ class Wallet:
                 self.cash += capital + fee + profit
                 self.locked -= capital + fee
                 self.settled += 1
-                if profit >= 0:
-                    self.wins += 1
-                else:
-                    self.losses += 1
                 freed += 1
                 self._record("settle", capital + fee + profit, settles_at,
                              window, capital=capital, fee=fee, profit=profit)
@@ -370,11 +377,13 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
     db.execute("""
         UPDATE paper_runs SET finished_at = ?, windows_seen = ?, trades = ?,
             skipped = ?, end_cash = ?, locked = ?, realised_profit = ?,
-            optimistic_profit = ?, fees_paid = ?, wins = ?, losses = ?
+            optimistic_profit = ?, fees_paid = ?, wins = ?, losses = ?,
+            gross_profit = ?, gross_loss = ?
         WHERE id = ?
     """, (utcnow(), seen, taken, seen - taken, wallet.cash, wallet.locked,
           wallet.realised, wallet.optimistic, wallet.fees,
-          wallet.wins, wallet.losses, run_id))
+          wallet.wins, wallet.losses, wallet.profit_sum, wallet.loss_sum,
+          run_id))
     db.commit()
 
     return {
@@ -385,6 +394,7 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
         "fees": wallet.fees,
         "settled": wallet.settled, "unsettled": wallet.unsettled,
         "wins": wallet.wins, "losses": wallet.losses,
+        "profit_sum": wallet.profit_sum, "loss_sum": wallet.loss_sum,
         "equity": wallet.equity,
     }
 
@@ -443,28 +453,42 @@ def print_run(db, summary: dict):
     print("=" * 62)
     print(f"  کیف پول کاغذی — اجرای #{s['run_id']}")
     print("=" * 62)
-    print(f"  سرمایه‌ی اولیه      ${s['start_cash']:,.2f}")
-    print(f"  پنجره‌های بررسی‌شده  {s['windows']:,}")
-    print(f"  معامله‌شده           {s['trades']:,}")
-    print(f"  رد شده              {s['skipped']:,}")
+    wins, losses = s.get("wins", 0), s.get("losses", 0)
+    won, lost = s.get("profit_sum", 0.0), s.get("loss_sum", 0.0)
+
+    print(f"  سرمایه‌ی اولیه   : ${s['start_cash']:>12,.2f}")
     print()
-    print(f"  سرمایه‌ی قفل‌شده     ${s['locked']:,.2f}"
-          f"   ({s.get('unsettled', 0)} سبد تسویه‌نشده)")
-    print(f"  نقد باقی‌مانده      ${s['cash']:,.2f}")
-    print(f"  سود قفل‌شده         ${s['realised']:,.2f}   ({ret:+.2f}٪)")
-    if s.get("fees"):
-        gross = s["realised"] + s["fees"]
-        share = s["fees"] / gross * 100 if gross else 0
-        print(f"  کارمزد پرداختی      ${s['fees']:,.2f}"
-              f"   ({share:.1f}٪ از سود ناخالص)")
-    if s.get("settled"):
-        print(f"  تسویه‌شده           {s['settled']} سبد — "
-              f"سرمایه‌شان دوباره قابل استفاده شد")
-        wins, losses = s.get("wins", 0), s.get("losses", 0)
-        if wins + losses:
-            rate = wins / (wins + losses) * 100
-            print(f"  سودده / زیان‌ده     {wins} / {losses}"
-                  f"   (نرخ موفقیت {rate:.0f}٪)")
+    print("  ---- موجودی کیف " + "-" * 44)
+    print(f"  کیف خالص (نقد)   : ${s['cash']:>12,.2f}   قابل استفاده")
+    print(f"  قفل‌شده در بازارها: ${s['locked']:>12,.2f}   "
+          f"{s.get('unsettled', 0)} سبد تسویه‌نشده")
+    print(f"  کل کیف (ناخالص)  : ${s.get('equity', 0):>12,.2f}   "
+          f"نقد + قفل‌شده")
+    print()
+    # Each line stands on its own rather than sharing a column grid:
+    # Persian labels and fixed-width padding do not line up in a terminal,
+    # and a table that almost aligns reads worse than one that does not try.
+    print("  ---- معاملات " + "-" * 47)
+    print(f"  معامله‌ی سودده  : {wins:>4}"
+          f"      مجموع سود : ${won:>10,.2f}")
+    print(f"  معامله‌ی زیان‌ده : {losses:>4}"
+          f"      مجموع ضرر : ${lost:>10,.2f}")
+    print(f"  {' ':>19}      سود خالص  : ${won + lost:>10,.2f}")
+    print(f"  {' ':>19}      کارمزد    : ${s.get('fees', 0):>10,.2f}", end="")
+    gross = won + lost + s.get("fees", 0)
+    if gross:
+        print(f"   ({s.get('fees', 0) / gross * 100:.1f}٪ از ناخالص)")
+    else:
+        print()
+    print()
+    print(f"  بازده روی سرمایه‌ی اولیه : {ret:+.2f}٪")
+    print()
+    print("  ---- پوشش " + "-" * 50)
+    print(f"  پنجره‌ی بررسی‌شده : {s['windows']:>5}")
+    print(f"  معامله‌شده        : {s['trades']:>5}"
+          f"   ({s.get('settled', 0)} تسویه شد،"
+          f" {s.get('unsettled', 0)} باز)")
+    print(f"  رد شده           : {s['skipped']:>5}")
     print()
 
     if s["trades"] == 0:
@@ -480,11 +504,10 @@ def print_run(db, summary: dict):
         print(f"      {label:<34} {r['n']:>6}  {share:>5.1f}٪")
     print()
     if s.get("wins") and not s.get("losses"):
-        print("  نرخ موفقیت ۱۰۰٪ است چون قاعده‌ی ورود فقط لبه‌ی مثبت می‌خرد و")
-        print("  سود در همان لحظه قفل می‌شود. زیان واقعی از جایی می‌آید که این")
-        print("  شبیه‌سازی نمی‌بیند: پر نشدن یکی از پاها و ماندن با موقعیت")
-        print("  پوشش‌نداده، یا بازاری که واقعاً انحصار متقابل نداشته. تا وقتی")
-        print("  آن‌ها مدل نشوند، این عدد را نباید نشانه‌ی بی‌خطر بودن گرفت.")
+        print("  صفر معامله‌ی زیان‌ده ساختاری است، نه دستاورد: قاعده‌ی ورود فقط")
+        print("  لبه‌ی مثبت می‌خرد و سود در همان لحظه قفل می‌شود. زیان واقعی از")
+        print("  جایی می‌آید که این شبیه‌سازی نمی‌بیند — پر نشدن یکی از پاها و")
+        print("  ماندن با موقعیت پوشش‌نداده، یا بازاری که انحصار متقابل نداشته.")
         print()
     print("  توجه: سود در لحظه‌ی خرید تعیین می‌شود، ولی پول تا تسویه‌ی بازار")
     print("  برنمی‌گردد. پنجره‌هایی که پیش از ثبت تاریخ تسویه ضبط شده‌اند تاریخ")
