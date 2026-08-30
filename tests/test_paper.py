@@ -674,3 +674,30 @@ def test_gross_wallet_is_cash_plus_locked(database):
     assert summary["equity"] == pytest.approx(
         summary["cash"] + summary["locked"])
     assert summary["cash"] < summary["equity"]      # something is locked
+
+
+def test_deploying_more_capital_is_not_the_same_as_choosing_better(database):
+    """
+    Taking every window commits more money, so it books more total profit
+    almost by definition. Judging the filters on the raw total would
+    always favour the control and say nothing about selection quality.
+    """
+    # one good window and several thin ones
+    add_window(database, slug="good", depth=100_000.0, seconds=12, edge=0.020)
+    for i in range(5):
+        add_window(database, slug=f"weak{i}", depth=100_000.0, seconds=12,
+                   edge=0.0005, start_ms=1_700_000_000_000 + (i + 1) * 60_000)
+
+    filtered = paper.replay(database, cash=10_000, min_window_ms=1000,
+                            min_edge=0.010, max_per_trade=250, min_capital=20)
+    control = paper.replay(database, cash=10_000, min_window_ms=1000,
+                           min_edge=0.010, max_per_trade=250, min_capital=20,
+                           take_everything=True)
+
+    used_f = filtered["start_cash"] - filtered["cash"]
+    used_c = control["start_cash"] - control["cash"]
+
+    # the control books more in absolute terms...
+    assert control["realised"] > filtered["realised"]
+    # ...only because it spent more; per dollar the filters chose better
+    assert (filtered["realised"] / used_f) > (control["realised"] / used_c)

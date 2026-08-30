@@ -600,13 +600,37 @@ def main():
         control = replay(db, label="control (every window)",
                          take_everything=True, **kwargs)
         print_run(db, control)
+        # Compared per dollar deployed, not on the raw total. Taking every
+        # window commits more capital, so it books more profit almost by
+        # definition — judging on the total alone would always favour the
+        # control and say nothing about whether the filters chose well.
+        def per_dollar(r):
+            used = r["locked"] + (r["start_cash"] - r["cash"] - r["locked"])
+            used = max(used, r["start_cash"] - r["cash"])
+            return (r["realised"] / used * 100) if used else 0.0
+
+        a, b = per_dollar(summary), per_dollar(control)
         print()
-        print(f"  فیلترشده  ${summary['realised']:>9,.2f} "
-              f"در {summary['trades']} معامله")
-        print(f"  بدون فیلتر ${control['realised']:>9,.2f} "
-              f"در {control['trades']} معامله")
-        better = summary["realised"] > control["realised"]
-        print(f"\n  {'فیلترها ارزش داشتند.' if better else 'فیلترها سود را بیشتر نکردند — بازنگری کنید.'}")
+        print("  " + "=" * 58)
+        print(f"  {'':<12}{'سود':>10}{'سرمایه‌ی به‌کاررفته':>20}"
+              f"{'بازده':>10}{'معامله':>9}")
+        print(f"  فیلترشده  ${summary['realised']:>9,.2f}"
+              f"   ${summary['start_cash'] - summary['cash']:>14,.2f}"
+              f"   {a:>7.2f}٪ {summary['trades']:>7}")
+        print(f"  بدون فیلتر ${control['realised']:>9,.2f}"
+              f"   ${control['start_cash'] - control['cash']:>14,.2f}"
+              f"   {b:>7.2f}٪ {control['trades']:>7}")
+        print("  " + "=" * 58)
+        if a > b:
+            print(f"\n  فیلترها ارزش داشتند: به ازای هر دلار "
+                  f"{a - b:.2f} واحد درصد بهتر.")
+        elif a < b:
+            print(f"\n  فیلترها به ازای هر دلار بدتر بودند "
+                  f"({b - a:.2f} واحد درصد) — بازنگری کنید.")
+        else:
+            print("\n  تفاوت معناداری نداشتند.")
+        print("  (سود مطلق بیشتر معمولاً یعنی سرمایه‌ی بیشتری خرج شده،")
+        print("   نه اینکه بهتر انتخاب شده — پس مقایسه به ازای دلار است.)")
 
     db.close()
 
