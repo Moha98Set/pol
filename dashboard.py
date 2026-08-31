@@ -609,6 +609,9 @@ def overview():
 
 
 OPP_COLS = {
+    # A date column: sortable, but excluded from the numeric min/max grid,
+    # because narrowing by time is what the range panel's own row is for.
+    "found_at":      Col("found_at", "زمان", "text"),
     "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
     "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
     "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
@@ -636,9 +639,15 @@ def opportunities():
         SELECT * FROM opportunities{where}
         ORDER BY {order_by} LIMIT ? OFFSET ?
     """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
+
+    # "nothing here" and "nothing matches your filter" are different
+    # problems, and the second one needs the filter panel left on screen so
+    # it can be undone.
+    grand_total = one("SELECT COUNT(*) c FROM opportunities")["c"]
+
     return render_template("opportunities.html", items=items, total=total,
-                           page=page, pages=_pages(total),
-                           sortstate=sortstate)
+                           grand_total=grand_total, page=page,
+                           pages=_pages(total), sortstate=sortstate)
 
 
 @app.route("/opportunity/<int:opp_id>")

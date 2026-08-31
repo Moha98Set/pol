@@ -18,7 +18,7 @@
   معمولاً چند برابر سرمایه می‌خواهد برای کسری بیشتر سود.
 </div></div>
 
-{% if total == 0 %}
+{% if grand_total == 0 %}
 <div class="panel"><div class="empty">
   <div class="big">هنوز فرصتی ثبت نشده است.</div>
   <div style="max-width:560px;margin:10px auto 0;line-height:1.9">
@@ -30,6 +30,17 @@
 </div></div>
 {% else %}
 {{ sortui.ranges(sortstate) }}
+
+{% if total == 0 %}
+<div class="panel"><div class="empty">
+  <div class="big">هیچ فرصتی با این فیلترها نیست.</div>
+  <div style="margin-top:10px">
+    {{ '{:,}'.format(grand_total) }} فرصت در کل ثبت شده —
+    <a href="{{ url_for('opportunities') }}">فیلترها را پاک کنید</a>.
+  </div>
+</div></div>
+{% else %}
+
 <div class="panel">
   <div class="scroll">
     <table>
@@ -43,7 +54,7 @@
         {{ sortui.th('top_profit',    'سود',        sortstate) }}
         {{ sortui.th('best_capital',  'با اسلیپیج', sortstate) }}
         {{ sortui.th('best_roi_pct',  'بازده',      sortstate) }}
-        <th>زمان</th>
+        {{ sortui.th('found_at',      'زمان',       sortstate, 'right') }}
       </tr></thead>
       <tbody>
         {% for r in items %}
@@ -68,6 +79,7 @@
   </div>
 </div>
 {% include "_pager.html" %}
+{% endif %}
 {% endif %}
 
 {% endblock %}

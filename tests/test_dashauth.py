@@ -429,3 +429,35 @@ def test_an_unknown_range_falls_back_rather_than_reaching_sql():
         key = dashboard.request.args.get("range")
         resolved = key if key in dashboard.TREND_RANGES else dashboard.TREND_DEFAULT
     assert resolved == dashboard.TREND_DEFAULT
+
+
+# =====================================================================
+# Date columns
+# =====================================================================
+
+
+def test_a_date_column_sorts_but_stays_out_of_the_numeric_grid():
+    """
+    Time is sortable like any other column, but narrowing by it belongs to
+    the range panel's own row — a min/max pair of numbers would be a
+    second, conflicting way to say the same thing.
+    """
+    import dashboard
+
+    assert "found_at" in dashboard.OPP_COLS
+    assert dashboard.OPP_COLS["found_at"].kind == "text"
+
+    with dashboard.app.test_request_context("/x?sort=found_at&dir=asc"):
+        order_by, _c, _p, state = dashboard.sort_and_filter(
+            dashboard.OPP_COLS, "top_profit", time_col="found_at")
+    assert state["sort"] == "found_at"
+    assert "found_at ASC" in order_by
+
+
+def test_the_opportunities_view_can_be_narrowed_by_time():
+    import dashboard
+    with dashboard.app.test_request_context("/x?since=24h"):
+        _o, clauses, params, state = dashboard.sort_and_filter(
+            dashboard.OPP_COLS, "top_profit", time_col="found_at")
+    assert clauses == ["found_at >= ?"]
+    assert state["time"]["since"] == "24h"
