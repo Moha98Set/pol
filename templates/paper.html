@@ -25,34 +25,60 @@
 
 <div class="panel">
   <h2>اجراها</h2>
+  <div class="body" style="border-bottom:1px solid var(--border);
+       color:var(--muted);font-size:13px;line-height:1.95">
+    <strong>در معامله</strong> پولی است که همین حالا داخل سبدهای تسویه‌نشده قفل است.
+    <strong>خالص (نقد)</strong> آن چیزی که می‌شود همین حالا خرج کرد.
+    <strong>ناخالص (کل)</strong> جمع این دو — یعنی کیف واقعاً چقدر می‌ارزد.
+    <br>
+    <strong>مجموع سود</strong> و <strong>مجموع ضرر</strong> جدا از هم می‌آیند تا
+    یک اجرا با چند برد بزرگ از اجرایی با برد و باخت زیاد قابل تشخیص باشد؛
+    تفاضلشان همان بازده است.
+    اجراهای قدیمی‌تر برای ستون‌هایی که هنوز اندازه‌گیری نمی‌شدند
+    <span class="num">—</span> نشان می‌دهند.
+  </div>
   <div class="scroll">
     <table>
-      <thead><tr>
-        <th>#</th><th>برچسب</th><th>زمان</th>
-        <th>پنجره</th><th>معامله</th><th>سرمایه‌ی اولیه</th>
-        <th>قفل‌شده</th><th>سودده</th><th>زیان‌ده</th>
-        <th>کارمزد</th><th>سود خالص</th><th>بازده</th>
-      </tr></thead>
+      <thead>
+        <tr>
+          <th rowspan="2">#</th><th rowspan="2">برچسب</th><th rowspan="2">زمان</th>
+          <th colspan="2" style="text-align:center">پوشش</th>
+          <th colspan="4" style="text-align:center">معاملات</th>
+          <th colspan="3" style="text-align:center">کیف پول</th>
+          <th rowspan="2">بازده</th>
+        </tr>
+        <tr>
+          <th>پنجره</th><th>معامله</th>
+          <th>سودده</th><th>زیان‌ده</th>
+          <th>مجموع سود</th><th>مجموع ضرر</th>
+          <th>در معامله</th><th>خالص (نقد)</th><th>ناخالص (کل)</th>
+        </tr>
+      </thead>
       <tbody>
         {% for r in runs %}
+        {% set gross = (r.end_cash or 0) + (r.locked or 0) %}
         <tr>
           <td class="num"><a href="{{ url_for('paper_run', run_id=r.id) }}">{{ r.id }}</a></td>
           <td class="wrap">{{ r.label or '—' }}</td>
           <td title="{{ r.started_at }}">{{ r.started_at|ago }}</td>
-          <td class="num">{{ r.windows_seen }}</td>
+
+          <td class="num">{{ '{:,}'.format(r.windows_seen or 0) }}</td>
           <td class="num {{ 'good' if r.trades else '' }}">{{ r.trades }}</td>
-          <td class="num">{{ r.start_cash|money }}</td>
-          <td class="num">{{ r.locked|money }}</td>
+
           <td class="num good">{{ r.wins or 0 }}</td>
           <td class="num {{ 'bad' if r.losses else '' }}">{{ r.losses or 0 }}</td>
-          <td class="num" style="color:var(--warn)">{{ r.fees_paid|money(2) }}</td>
-          <td class="num {{ 'good' if r.realised_profit and r.realised_profit > 0 else '' }}">
-            {{ r.realised_profit|money(2) }}</td>
+          <td class="num {{ 'good' if r.gross_profit else '' }}">{{ r.gross_profit|money(2) }}</td>
+          <td class="num {{ 'bad' if r.gross_loss else '' }}">{{ r.gross_loss|money(2) }}</td>
+
+          <td class="num">{{ r.locked|money(2) }}</td>
+          <td class="num">{{ r.end_cash|money(2) }}</td>
+          <td class="num"><strong>{{ gross|money(2) }}</strong></td>
+
           <td class="num {{ 'good' if r.realised_profit and r.realised_profit > 0 else '' }}">
             {% if r.start_cash %}{{ (r.realised_profit / r.start_cash)|pct(2) }}{% else %}—{% endif %}</td>
         </tr>
         {% else %}
-        <tr><td colspan="12" class="empty">
+        <tr><td colspan="13" class="empty">
           <div class="big">هنوز اجرایی ثبت نشده است.</div>
           <div style="max-width:600px;margin:12px auto 0;line-height:1.9;text-align:right">
             کیف پول از خط فرمان اجرا می‌شود، چون یک ابزار تحلیل است نه سرویس:

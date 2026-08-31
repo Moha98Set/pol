@@ -120,6 +120,10 @@ h2{font-size:17px; margin:28px 0 12px}
 table{width:100%; border-collapse:collapse; font-size:14px}
 th,td{padding:10px 13px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
 th{background:var(--surface-2); color:var(--muted); font-weight:600; font-size:13px; position:sticky; top:0}
+/* grouped header: the top row labels a span of columns below it */
+thead tr:first-child th[colspan]{
+  border-bottom:1px solid var(--border); font-size:12px; opacity:.85;
+}
 tbody tr:hover{background:var(--surface-2)}
 td.wrap{white-space:normal; min-width:260px; max-width:440px}
 tr:last-child td{border-bottom:none}
