@@ -454,6 +454,25 @@ def sort_url(col: str) -> str:
 app.jinja_env.globals.update(sort_url=sort_url)
 
 
+# Which slice of the window log to show. "positive" is the default: only
+# windows whose basket actually got cheaper than its payout, so buying it
+# would have profited. The rest are kept and one click away — recording a
+# wide band is deliberate — but they are not the default view.
+WINDOW_SHOW = {
+    "positive": "best_edge > 0",
+    "crossed": "crossed = 1",
+    "all": None,
+}
+
+
+def _window_show() -> str:
+    show = request.args.get("show")
+    if show in WINDOW_SHOW:
+        return show
+    # Links made before this filter existed used ?crossed=1.
+    return "crossed" if request.args.get("crossed") == "1" else "positive"
+
+
 # =====================================================================
 # Auth routes
 # =====================================================================
@@ -870,15 +889,19 @@ WINDOW_COLS = {
 def windows():
     if not table_exists("edge_windows"):
         return render_template("no_windows.html")
+    # Default to the tradable slice. Around 95% of recorded windows never
+    # reach a positive edge — they are worth keeping, because they show
+    # how close the market comes, but they are not what an analyst opens
+    # this page to find, and they bury the few hundred rows that are.
 
     page = max(1, request.args.get("page", 1, type=int))
-    crossed_only = request.args.get("crossed") == "1"
+    show = _window_show()
 
     order_by, extra, params, sortstate = sort_and_filter(
         WINDOW_COLS, "opened_at", time_col="opened_at")
     clauses = ["closed_at IS NOT NULL"]
-    if crossed_only:
-        clauses.append("crossed = 1")
+    if WINDOW_SHOW[show]:
+        clauses.append(WINDOW_SHOW[show])
     clauses += extra
     where = " WHERE " + " AND ".join(clauses)
 
@@ -891,9 +914,11 @@ def windows():
     summary = one("""
         SELECT COUNT(*) n,
                SUM(crossed) crossed,
+               SUM(best_edge > 0) positive,
                AVG(duration_ms) avg_ms,
                MAX(duration_ms) max_ms,
-               MAX(best_edge) best
+               MAX(best_edge) best,
+               AVG(CASE WHEN best_edge > 0 THEN duration_ms END) pos_avg_ms
         FROM edge_windows WHERE closed_at IS NOT NULL
     """)
     live = one("SELECT COUNT(*) c FROM edge_windows "
@@ -926,7 +951,7 @@ def windows():
         "windows.html", items=items, total=total, page=page,
         pages=_pages(total), summary=summary, live=live, buckets=buckets,
         by_hour={r["hour"]: r["n"] for r in by_hour},
-        crossed_only=crossed_only, sortstate=sortstate)
+        show=show, sortstate=sortstate)
 
 
 @app.route("/window/<int:window_id>")

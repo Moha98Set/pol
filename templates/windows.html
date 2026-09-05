@@ -11,12 +11,17 @@
 
 <div class="cards">
   <div class="card"><div class="k">کل پنجره‌ها</div>
-    <div class="v num">{{ summary.n or 0 }}</div></div>
+    <div class="v num">{{ '{:,}'.format(summary.n or 0) }}</div>
+    <div class="note">شامل نزدیک‌شده‌ها</div></div>
+  <div class="card"><div class="k">لبه‌ی مثبت</div>
+    <div class="v num {{ 'good' if summary.positive else '' }}">{{ '{:,}'.format(summary.positive or 0) }}</div>
+    <div class="note">{% if summary.n %}{{ (summary.positive / summary.n * 100)|round(1) }}٪ — تنها این‌ها قابل خرید بودند{% endif %}</div></div>
   <div class="card"><div class="k">به آستانه رسیدند</div>
-    <div class="v num {{ 'good' if summary.crossed else '' }}">{{ summary.crossed or 0 }}</div>
-    <div class="note">بقیه فقط نزدیک شدند</div></div>
+    <div class="v num {{ 'good' if summary.crossed else '' }}">{{ '{:,}'.format(summary.crossed or 0) }}</div>
+    <div class="note">{% if summary.positive %}{{ (summary.crossed / summary.positive * 100)|round|int }}٪ از لبه‌مثبت‌ها{% endif %}</div></div>
   <div class="card"><div class="k">میانگین طول</div>
-    <div class="v num">{{ summary.avg_ms|duration }}</div></div>
+    <div class="v num">{{ summary.avg_ms|duration }}</div>
+    <div class="note">لبه‌مثبت‌ها: {{ summary.pos_avg_ms|duration }}</div></div>
   <div class="card"><div class="k">طولانی‌ترین</div>
     <div class="v num">{{ summary.max_ms|duration }}</div></div>
   <div class="card"><div class="k">بهترین لبه‌ی دیده‌شده</div>
@@ -68,15 +73,24 @@
 
 <form class="filters" method="get">
   <div class="field">
-    <label for="crossed">نمایش</label>
-    <select id="crossed" name="crossed" onchange="this.form.submit()">
-      <option value="">همه‌ی پنجره‌ها</option>
-      <option value="1" {{ 'selected' if crossed_only }}>فقط آن‌هایی که سیگنال شدند</option>
+    <label for="show">نمایش</label>
+    <select id="show" name="show" onchange="this.form.submit()">
+      <option value="positive" {{ 'selected' if show == 'positive' }}>فقط لبه‌ی مثبت — قابل خرید ({{ '{:,}'.format(summary.positive or 0) }})</option>
+      <option value="crossed"  {{ 'selected' if show == 'crossed'  }}>فقط آن‌هایی که سیگنال شدند ({{ '{:,}'.format(summary.crossed or 0) }})</option>
+      <option value="all"      {{ 'selected' if show == 'all'      }}>همه‌ی پنجره‌ها، شامل نزدیک‌شده‌ها ({{ '{:,}'.format(summary.n or 0) }})</option>
     </select>
   </div>
   <button type="submit">اعمال</button>
   <a class="btn ghost" href="{{ request.path }}">پاک کردن</a>
 </form>
+
+{% if show == 'positive' %}
+<p class="sub" style="margin:-6px 0 14px">
+  <strong>لبه‌ی مثبت</strong> یعنی سبد ارزان‌تر از پرداخت تضمینی‌اش بود، پس خریدش سود می‌داد.
+  پنجره‌های با لبه‌ی منفی عمداً ثبت می‌شوند تا ببینیم بازار چقدر نزدیک می‌شود، ولی قابل معامله نیستند —
+  از همین کادر بالا می‌شود آن‌ها را هم دید.
+</p>
+{% endif %}
 
 {{ sortui.ranges(sortstate) }}
 
@@ -109,12 +123,25 @@
         </tr>
         {% else %}
         <tr><td colspan="9" class="empty">
+          {% if summary.n %}
+          <div class="big">هیچ پنجره‌ای با این فیلترها نیست.</div>
+          <div style="max-width:560px;margin:10px auto 0;line-height:1.9">
+            {{ '{:,}'.format(summary.n) }} پنجره در کل ثبت شده است.
+            {% if show != 'all' %}
+              نمایش روی <strong>{{ 'فقط لبه‌ی مثبت' if show == 'positive' else 'فقط سیگنال‌شده‌ها' }}</strong> است —
+              <a href="{{ url_for('windows', show='all') }}">همه را ببینید</a>.
+            {% else %}
+              <a href="{{ url_for('windows') }}">فیلترها را پاک کنید</a>.
+            {% endif %}
+          </div>
+          {% else %}
           <div class="big">هنوز پنجره‌ای ثبت نشده است.</div>
           <div style="max-width:560px;margin:10px auto 0;line-height:1.9">
             موتور زنده باید در حال اجرا باشد و بازارها باید وارد محدوده‌ی
             <span class="num">{{ '{:.1f}'.format(-2.0) }}٪</span> شوند. در بازار آرام
             ممکن است ساعت‌ها طول بکشد.
           </div>
+          {% endif %}
         </td></tr>
         {% endfor %}
       </tbody>
