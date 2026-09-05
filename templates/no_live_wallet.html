@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}کیف پول زنده — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+<h1>کیف پول زنده</h1>
+<div class="panel"><div class="empty">
+  <div class="big">کیف پول زنده هنوز روشن نشده است.</div>
+  <div style="max-width:640px;margin:12px auto 0;line-height:1.95;text-align:right">
+    برخلاف <a href="{{ url_for('paper_runs') }}">بازپخش</a> که از خط فرمان روی
+    داده‌ی ثبت‌شده اجرا می‌شود، این یکی <strong>داخل موتور زنده</strong> کار
+    می‌کند و روی سیگنال‌های واقعی تصمیم می‌گیرد.
+    <br><br>
+    برای روشن کردنش در <span class="num">/etc/polly/polly.env</span>:
+    <br><br>
+    <span class="num">PAPER_LIVE_ENABLED=1</span>
+    <br><br>
+    و بعد <span class="num">sudo systemctl restart polly-live</span>.
+    <br><br>
+    هیچ سفارش واقعی ثبت نمی‌شود — با پول ساختگی تصمیم می‌گیرد و معامله ثبت
+    می‌کند. جدول‌ها با اولین اجرا ساخته می‌شوند.
+  </div>
+</div></div>
+{% endblock %}

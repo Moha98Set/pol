@@ -1140,6 +1140,84 @@ def _paper_labels():
     return paper.SKIP_LABELS
 
 
+LIVE_COLS = {
+    "total_ms":      Col("total_ms", "تأخیر واقعی", "duration", 1000, "0.1"),
+    "signal_edge":   Col("signal_edge", "لبه‌ی سیگنال", "percent", 0.01, "0.001"),
+    "entry_edge":    Col("entry_edge", "لبه‌ی ورود", "percent", 0.01, "0.001"),
+    "capital":       Col("capital", "سرمایه", "money", step="10"),
+    "fee":           Col("fee", "کارمزد", "money", step="0.5"),
+    "profit":        Col("profit", "سود", "money", step="0.5"),
+    "fillable_capital": Col("fillable_capital", "عمق", "money", step="10"),
+    "at":            Col("at", "زمان", "text"),
+}
+
+
+@app.route("/live-wallet")
+@login_required
+def live_wallet():
+    if not table_exists("live_wallet"):
+        return render_template("no_live_wallet.html")
+
+    wallet = one("SELECT * FROM live_wallet WHERE id = 1")
+    if wallet is None:
+        return render_template("no_live_wallet.html")
+
+    page = max(1, request.args.get("page", 1, type=int))
+    taken = request.args.get("taken", "")
+
+    order_by, extra, params, sortstate = sort_and_filter(
+        LIVE_COLS, "at", time_col="at")
+    clauses = list(extra)
+    if taken in ("0", "1"):
+        clauses.append(f"taken = {int(taken)}")
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    total = one(f"SELECT COUNT(*) c FROM live_decisions{where}",
+                params)["c"]
+    items = rows(f"""
+        SELECT * FROM live_decisions{where}
+        ORDER BY {order_by} LIMIT ? OFFSET ?
+    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
+
+    reasons = rows("""
+        SELECT reason, COUNT(*) n, SUM(profit) profit
+        FROM live_decisions GROUP BY reason ORDER BY n DESC
+    """)
+
+    # The measurement this page exists for. The replay assumes a latency;
+    # here it was waited out, so these are what it really cost — and how
+    # much of the edge was still there afterwards.
+    latency = one("""
+        SELECT COUNT(*) n, AVG(total_ms) avg_ms, MAX(total_ms) max_ms,
+               AVG(signal_edge - entry_edge) decay
+        FROM live_decisions WHERE total_ms IS NOT NULL
+          AND signal_edge IS NOT NULL AND entry_edge IS NOT NULL
+    """)
+
+    positions = rows("""
+        SELECT * FROM live_positions WHERE settled_at IS NULL
+        ORDER BY opened_at DESC
+    """)
+
+    ledger = rows("""
+        SELECT * FROM live_ledger ORDER BY id DESC LIMIT 25
+    """)
+
+    curve = rows("SELECT id, at, equity_after, balance_after, kind "
+                 "FROM live_ledger ORDER BY id")
+    if len(curve) > 120:
+        step = len(curve) // 120 + 1
+        curve = curve[::step] + [curve[-1]]
+
+    import livewallet as lw
+    return render_template(
+        "live_wallet.html", wallet=wallet, items=items, total=total,
+        page=page, pages=_pages(total), reasons=reasons, taken=taken,
+        sortstate=sortstate, positions=positions, ledger=ledger,
+        curve=curve, latency=latency, labels=lw.SKIP_LABELS,
+        params=fromjson(wallet["params"]) or {})
+
+
 # =====================================================================
 # Funnel
 # =====================================================================

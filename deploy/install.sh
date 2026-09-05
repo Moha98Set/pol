@@ -75,7 +75,7 @@ else
     for key in VERDICT_RETENTION_SCANS POLLY_DASH_HOST POLLY_DASH_PORT \
                POLLY_DASH_USER POLLY_DASH_PASSWORD_HASH POLLY_DASH_SECRET_KEY \
                LIVE_RECORD LIVE_RECORD_MIN_EDGE LIVE_TICK_MIN_INTERVAL_MS \
-               TICK_RETENTION_DAYS; do
+               TICK_RETENTION_DAYS PAPER_LIVE_ENABLED; do
         if ! grep -qE "^${key}=" "$CONF_DIR/polly.env"; then
             added+=("$key")
         fi
@@ -94,6 +94,7 @@ else
                     LIVE_RECORD_MIN_EDGE)    echo "LIVE_RECORD_MIN_EDGE=-0.02" ;;
                     LIVE_TICK_MIN_INTERVAL_MS) echo "LIVE_TICK_MIN_INTERVAL_MS=1000" ;;
                     TICK_RETENTION_DAYS)     echo "TICK_RETENTION_DAYS=7" ;;
+                    PAPER_LIVE_ENABLED)      echo "PAPER_LIVE_ENABLED=0" ;;
                     *)                       echo "${key}=" ;;
                 esac
             done

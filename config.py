@@ -308,6 +308,22 @@ PAPER_MIN_CAPITAL = _value("PAPER_MIN_CAPITAL", 20.0)
 # an unhedged half-basket.
 PAPER_MAX_LEGS = _value("PAPER_MAX_LEGS", 12, int)
 
+# The live paper wallet, running inside the live engine on real signals in
+# wall-clock time. Off by default: with it off the engine stays what it
+# has always been, a recorder that places nothing and decides nothing.
+#
+# It shares the settings above so its results and the replay's are
+# comparable, and it reuses the latency constants deliberately — its whole
+# purpose is to wait them out for real and report what the market did
+# meanwhile, which is the one thing the replay cannot check about itself.
+PAPER_LIVE_ENABLED = _env("PAPER_LIVE_ENABLED", False, bool)
+
+# How often to sweep for baskets whose end date has passed. The resolution
+# message is faster and authoritative, but it only arrives while we are
+# still watching the market, so this is the backstop that keeps capital
+# from staying locked forever.
+PAPER_LIVE_SETTLE_INTERVAL = _value("PAPER_LIVE_SETTLE_INTERVAL", 900, int)
+
 
 # =====================================================================
 # Alerts

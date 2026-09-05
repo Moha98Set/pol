@@ -865,3 +865,98 @@ def test_the_stream_no_longer_trims_the_subscription(recording_engine):
     src = inspect.getsource(live_engine.LiveEngine._stream)
     assert "[:MAX_TOKENS_PER_SOCKET]" not in src
     assert "list(self.token_to_events)" in src
+
+
+# =====================================================================
+# The live paper wallet's wiring
+# =====================================================================
+#
+# The wallet's own arithmetic is tested in test_livewallet.py. What is
+# tested here is the join between the two, which is where this could break
+# without either side looking wrong on its own.
+
+
+@pytest.fixture
+def paper_engine(tmp_path, monkeypatch):
+    import db as dblib
+    import livewallet
+
+    monkeypatch.setattr(config, "PAPER_LIVE_ENABLED", True)
+    eng = LiveEngine(store=False, capitals=[100], min_edge=0.003)
+    eng.db = dblib.connect(tmp_path / "paper.db", check_same_thread=False)
+    eng.wallet = livewallet.LiveWallet(eng.db, eng.price, start_cash=1000.0)
+    eng.on_signal = eng._paper_signal
+    yield eng
+    eng.db.close()
+
+
+def test_the_wallet_prices_from_the_engines_current_books(paper_engine):
+    """
+    The wallet is handed engine.price, not a snapshot. That is the whole
+    mechanism: it re-reads the books at decision time.
+    """
+    watched = watch(paper_engine, "ev", n=3)
+    for i in range(3):
+        paper_engine.books[f"ev-{i}"].apply_snapshot(
+            levels((0.30, 500)), levels((0.20, 500)))
+
+    side, result, edge = paper_engine.wallet.price_now(watched)
+    assert side == "yes"
+    assert result["sum_best_asks"] == pytest.approx(0.90)
+    assert edge > 0
+
+
+def test_price_leaves_signal_and_window_state_alone(paper_engine):
+    """
+    The wallet calls it a second time on an event that already has a live
+    signal; if it mutated state it would close or reopen that signal, and
+    the signals table would record a life that never happened.
+    """
+    watched = watch(paper_engine, "ev", n=3)
+    for i in range(3):
+        paper_engine.books[f"ev-{i}"].apply_snapshot(
+            levels((0.30, 500)), levels((0.20, 500)))
+    paper_engine._evaluate_event(watched)
+
+    before = dict(watched.signal)
+    paper_engine.price(watched)
+
+    assert watched.signal["first_seen_ts"] == before["first_seen_ts"]
+    assert watched.signal["updates"] == before["updates"]
+
+
+def test_a_resolved_market_settles_the_basket_it_was_holding(paper_engine):
+    """
+    We hold the whole basket, so which outcome won does not matter — but
+    the event is dropped from the watchlist on resolution, and settling
+    after that drop would find nothing to settle.
+    """
+    watch(paper_engine, "ev", n=3)
+    for i in range(3):
+        paper_engine.books[f"ev-{i}"].apply_snapshot(
+            levels((0.30, 500)), levels((0.20, 500)))
+    paper_engine.wallet.consider(
+        {"event_slug": "ev", "event_title": "ev", "side": "yes",
+         "num_outcomes": 3, "payout_per_basket": 1.0, "fee_rate": 0.0,
+         "best_net_edge": 0.01, "best_sum_asks": 0.99, "age_ms": 250.0,
+         "first_seen_ts": None, "url": ""},
+        paper_engine.events["ev"])
+    assert paper_engine.wallet.locked > 0
+
+    paper_engine.token_to_events["ev-0"] = ["ev"]
+    paper_engine.handle_message({"event_type": "market_resolved",
+                                 "asset_id": "ev-0"})
+
+    assert paper_engine.wallet.locked == pytest.approx(0.0)
+    assert paper_engine.wallet.cash > 1000.0
+
+
+def test_observe_only_stays_observe_only_by_default(tmp_path, monkeypatch):
+    """
+    The wallet must never appear because a config file drifted. Off is the
+    default, and the engine says which mode it is in.
+    """
+    monkeypatch.setattr(config, "PAPER_LIVE_ENABLED", False)
+    eng = LiveEngine(store=False, capitals=[100], min_edge=0.003)
+    assert eng.wallet is None
+    assert eng.on_signal is None

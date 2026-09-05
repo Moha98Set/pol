@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% import "_sort.html" as sortui %}
+{% block title %}کیف پول زنده — داشبورد آربیتراژ{% endblock %}
+{% block body %}
+
+<h1>کیف پول زنده</h1>
+<p class="sub">
+  پول واقعی درگیر نیست و هیچ سفارشی ثبت نمی‌شود — ولی برخلاف
+  <a href="{{ url_for('paper_runs') }}">بازپخش</a>، این یکی روی سیگنال‌های واقعی و
+  با ساعت واقعی تصمیم می‌گیرد.
+</p>
+
+<div class="panel"><div class="body" style="line-height:1.95">
+  تفاوت اصلی در یک جمله: بازپخش <em>حدس می‌زند</em> سفارش چه زمانی به بازار
+  می‌رسید و تیک نزدیک آن لحظه را می‌خواند. این یکی واقعاً همان‌قدر
+  <strong>صبر می‌کند</strong> و بعد قیمت را از دفتری می‌خواند که در آن لحظه
+  وجود دارد. اگر لبه در فاصله‌ی صبر از بین رفته باشد، همان ثبت می‌شود.
+  <br><br>
+  <strong>چیزی که این هم اندازه نمی‌گیرد:</strong> پر شدن یا نشدن پاها. چون
+  سفارشی ثبت نمی‌شود، سبدی که در واقعیت نیمه‌پر می‌ماند اینجا دقیقاً مثل سبدی
+  دیده می‌شود که کامل پر شده. آن ریسک را فقط پول واقعی جواب می‌دهد.
+</div></div>
+
+<div class="cards">
+  <div class="card"><div class="k">کیف خالص (نقد)</div>
+    <div class="v num">{{ wallet.cash|money(2) }}</div>
+    <div class="note">قابل استفاده</div></div>
+  <div class="card"><div class="k">در معامله</div>
+    <div class="v num">{{ wallet.locked|money(2) }}</div>
+    <div class="note">{{ positions|length }} سبد تسویه‌نشده</div></div>
+  {% set equity = (wallet.cash or 0) + (wallet.locked or 0) %}
+  <div class="card"><div class="k">کل کیف (ناخالص)</div>
+    <div class="v num {{ 'good' if equity > wallet.start_cash else '' }}">{{ equity|money(2) }}</div>
+    <div class="note">از {{ wallet.start_cash|money(0) }} شروع شد</div></div>
+  <div class="card"><div class="k">مجموع سود</div>
+    <div class="v num {{ 'good' if wallet.gross_profit else '' }}">{{ wallet.gross_profit|money(2) }}</div>
+    <div class="note">{{ wallet.wins or 0 }} معامله‌ی سودده</div></div>
+  <div class="card"><div class="k">مجموع ضرر</div>
+    <div class="v num {{ 'bad' if wallet.gross_loss else '' }}">{{ wallet.gross_loss|money(2) }}</div>
+    <div class="note">{{ wallet.losses or 0 }} معامله‌ی زیان‌ده</div></div>
+  <div class="card"><div class="k">کارمزد پرداختی</div>
+    <div class="v num warn">{{ wallet.fees_paid|money(2) }}</div>
+    <div class="note">
+      {% set g = (wallet.realised_profit or 0) + (wallet.fees_paid or 0) %}
+      {% if g %}{{ (wallet.fees_paid / g * 100)|round(1) }}٪ از ناخالص{% else %}—{% endif %}</div></div>
+  <div class="card"><div class="k">معامله</div>
+    <div class="v num {{ 'good' if wallet.trades else '' }}">{{ wallet.trades or 0 }}</div>
+    <div class="note">{{ wallet.settled or 0 }} تسویه شد</div></div>
+  <div class="card"><div class="k">آخرین حرکت</div>
+    <div class="v" style="font-size:18px">{{ wallet.updated_at|ago }}</div>
+    <div class="note">از {{ wallet.created_at|ago }} فعال</div></div>
+</div>
+
+{% if latency and latency.n %}
+<div class="panel">
+  <h2>تأخیر واقعی — چیزی که فقط اینجا اندازه‌گیری می‌شود</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0">
+      بازپخش فرض می‌کند ورود
+      <span class="num">{{ params.get('latency_base_ms', 400) }}ms</span> +
+      <span class="num">{{ params.get('latency_per_leg_ms', 300) }}ms</span> به‌ازای هر پا
+      طول می‌کشد. اینجا آن فاصله واقعاً صبر شده، پس این اعداد قابل مقایسه با آن فرض‌اند.
+    </p>
+    <div class="rangegrid">
+      <div class="rangecol"><label>تصمیم اندازه‌گیری‌شده</label>
+        <div class="num">{{ latency.n }}</div></div>
+      <div class="rangecol"><label>میانگین از سیگنال تا تصمیم</label>
+        <div class="num">{{ latency.avg_ms|duration }}</div></div>
+      <div class="rangecol"><label>بدترین حالت</label>
+        <div class="num">{{ latency.max_ms|duration }}</div></div>
+      <div class="rangecol"><label>میانگین افت لبه در همین فاصله</label>
+        <div class="num {{ 'bad' if latency.decay and latency.decay > 0 else 'good' }}">
+          {{ latency.decay|pct(3) }}</div></div>
+    </div>
+    <p class="sub" style="margin-bottom:0">
+      «افت لبه» یعنی چقدر از لبه بین دیده‌شدن سیگنال و رسیدن سفارش از بین رفت.
+      عدد مثبت یعنی بازار در فاصله‌ی صبر علیه ما حرکت کرده — و هرچه بزرگ‌تر باشد،
+      خوش‌بینانه‌تر بودنِ فرض‌های بازپخش را بیشتر نشان می‌دهد.
+    </p>
+  </div>
+</div>
+{% endif %}
+
+{% if positions %}
+<div class="panel">
+  <h2>سبدهای باز</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>سمت</th><th>خریداری شد</th>
+        <th>سرمایه</th><th>کارمزد</th><th>سود قفل‌شده</th><th>تسویه</th>
+      </tr></thead>
+      <tbody>
+        {% for p in positions %}
+        <tr>
+          <td class="wrap">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.event_title or p.event_slug }}</a>
+            {%- else %}{{ p.event_title or p.event_slug }}{% endif %}
+            <span class="tag">{{ p.num_outcomes }} پا</span></td>
+          <td>{{ 'بله' if p.side == 'yes' else 'نه' }}</td>
+          <td title="{{ p.opened_at }}">{{ p.opened_at|ago }}</td>
+          <td class="num">{{ p.capital|money(2) }}</td>
+          <td class="num" style="color:var(--warn)">{{ p.fee|money(2) }}</td>
+          <td class="num good">{{ p.profit|money(2) }}</td>
+          <td class="num">{% if p.end_date %}{{ p.end_date[:10] }}{% else %}
+            <span class="tag" title="تاریخ تسویه ثبت نشده؛ تا رسیدن پیام حل‌شدن بازار قفل می‌ماند">نامعلوم</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% if curve|length > 1 %}
+<div class="panel">
+  <h2>روند دارایی</h2>
+  <div class="body">
+    {% set vals = curve | map(attribute='equity_after') | list %}
+    {% set lo = [vals|min, wallet.start_cash]|min %}
+    {% set hi = [vals|max, wallet.start_cash]|max %}
+    {% set span = (hi - lo) if (hi - lo) > 0 else 1 %}
+    {% set n = curve|length %}
+    {% set start_y = 150 - ((wallet.start_cash - lo) / span * 130) %}
+    <svg viewBox="0 0 800 175" preserveAspectRatio="none"
+         style="display:block;width:100%;height:175px" role="img"
+         aria-label="روند دارایی کیف پول زنده">
+      <line x1="0" y1="{{ start_y }}" x2="800" y2="{{ start_y }}"
+            stroke="var(--muted)" stroke-width="1" stroke-dasharray="5 4" opacity="0.6"/>
+      <text x="6" y="{{ start_y - 6 }}" fill="var(--muted)" font-size="11"
+            direction="ltr" text-anchor="start">سرمایه‌ی اولیه</text>
+      <polyline fill="none" stroke="var(--good)" stroke-width="2.5"
+        points="{% for r in curve %}{{ loop.index0 * (800 / (n - 1)) }},{{ 150 - ((r.equity_after - lo) / span * 130) }} {% endfor %}"/>
+    </svg>
+  </div>
+</div>
+{% endif %}
+
+{% if reasons %}
+<div class="panel">
+  <h2>چه شد و چرا</h2>
+  <div class="body">
+    <p class="sub" style="margin-top:0">
+      «۴۰ سیگنال دیدیم و ۲ تا خریدیم» بدون آن ۳۸ تای دیگر خواندنی نیست.
+    </p>
+    {% set biggest = reasons | map(attribute='n') | max %}
+    {% for r in reasons %}
+      <div class="bar-row">
+        <div class="label">
+          {% if r.reason == 'taken' %}<span class="tag good">{{ labels.get(r.reason, r.reason) }}</span>
+          {% else %}{{ labels.get(r.reason, r.reason) }}{% endif %}
+        </div>
+        <div class="track"><div class="fill"
+          style="width:{{ (r.n / biggest * 100)|round(1) }}%;
+                 {% if r.reason == 'taken' %}background:var(--good){% endif %}"></div></div>
+        <div class="n num">{{ r.n }}{% if r.profit %} · {{ r.profit|money(2) }}{% endif %}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% if ledger %}
+<div class="panel">
+  <h2>آخرین حرکت‌های کیف</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>زمان</th><th>رویداد</th><th>بازار</th>
+        <th>تغییر</th><th>نقد پس از آن</th><th>کل دارایی</th>
+      </tr></thead>
+      <tbody>
+        {% for r in ledger %}
+        <tr>
+          <td title="{{ r.at }}">{{ r.at|ago }}</td>
+          <td>{% if r.kind == 'buy' %}<span class="tag">خرید</span>
+              {% else %}<span class="tag good">تسویه</span>{% endif %}</td>
+          <td class="wrap">{{ r.event_title or r.event_slug }}</td>
+          <td class="num {{ 'good' if r.amount > 0 else '' }}">{{ r.amount|money(2) }}</td>
+          <td class="num">{{ r.balance_after|money(2) }}</td>
+          <td class="num">{{ r.equity_after|money(2) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<form class="filters" method="get">
+  <div class="field">
+    <label for="taken">نمایش</label>
+    <select id="taken" name="taken" onchange="this.form.submit()">
+      <option value=""  {{ 'selected' if taken not in ['0','1'] }}>همه‌ی تصمیم‌ها</option>
+      <option value="1" {{ 'selected' if taken == '1' }}>فقط خریدها</option>
+      <option value="0" {{ 'selected' if taken == '0' }}>فقط ردشده‌ها</option>
+    </select>
+  </div>
+</form>
+
+{{ sortui.ranges(sortstate) }}
+
+<div class="panel">
+  <h2>{{ '{:,}'.format(total) }} تصمیم</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr>
+        <th>بازار</th><th>نتیجه</th>
+        {{ sortui.th('at',           'زمان',        sortstate, 'right') }}
+        {{ sortui.th('total_ms',     'تأخیر واقعی', sortstate) }}
+        {{ sortui.th('signal_edge',  'لبه‌ی سیگنال', sortstate) }}
+        {{ sortui.th('entry_edge',   'لبه‌ی ورود',   sortstate) }}
+        {{ sortui.th('fillable_capital', 'عمق',     sortstate) }}
+        {{ sortui.th('capital',      'سرمایه',      sortstate) }}
+        {{ sortui.th('fee',          'کارمزد',      sortstate) }}
+        {{ sortui.th('profit',       'سود',         sortstate) }}
+      </tr></thead>
+      <tbody>
+        {% for r in items %}
+        <tr>
+          <td class="wrap">{{ r.event_title or r.event_slug }}
+            <span class="tag">{{ r.num_outcomes }} پا</span></td>
+          <td>{% if r.taken %}<span class="tag good">خرید</span>
+              {% else %}<span class="tag">{{ labels.get(r.reason, r.reason) }}</span>{% endif %}</td>
+          <td title="{{ r.at }}">{{ r.at|ago }}</td>
+          <td class="num">{{ r.total_ms|duration }}</td>
+          <td class="num">{{ r.signal_edge|pct(3) }}</td>
+          <td class="num {{ 'good' if r.entry_edge and r.entry_edge > 0 else '' }}">{{ r.entry_edge|pct(3) }}</td>
+          <td class="num">{{ r.fillable_capital|money(0) }}</td>
+          <td class="num">{{ r.capital|money(2) }}</td>
+          <td class="num" style="color:var(--warn)">{{ r.fee|money(2) }}</td>
+          <td class="num {{ 'good' if r.profit and r.profit > 0 else '' }}">{{ r.profit|money(2) }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="10" class="empty">
+          {% if wallet.trades or total %}
+          <div class="big">چیزی با این فیلتر نیست.</div>
+          {% else %}
+          <div class="big">هنوز سیگنالی به کیف نرسیده است.</div>
+          <div style="max-width:600px;margin:10px auto 0;line-height:1.9">
+            کیف فقط وقتی تصمیم می‌گیرد که موتور زنده سیگنالی بالای آستانه ببیند.
+            روی این بازار حدود <strong>سه بار در روز</strong> اتفاق می‌افتد، پس
+            خالی بودن این جدول در ساعت‌های اول طبیعی است.
+          </div>
+          {% endif %}
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pager.html" %}
+
+{% endblock %}

@@ -417,6 +417,123 @@ CREATE INDEX IF NOT EXISTS idx_pled_run ON paper_ledger(run_id, seq);
 CREATE INDEX IF NOT EXISTS idx_pdec_run ON paper_decisions(run_id, taken);
 CREATE INDEX IF NOT EXISTS idx_pdec_reason ON paper_decisions(reason);
 
+-- =====================================================================
+-- The live paper wallet
+-- =====================================================================
+--
+-- The replay above answers "would these parameters have made money" and
+-- can be re-run over the same history with different ones. It cannot
+-- answer whether a tick it read was a tick anybody could have acted on,
+-- because it estimates execution latency with a formula.
+--
+-- These tables are the other half: one wallet, running inside the live
+-- engine, deciding in wall-clock time against the book as it actually is
+-- when the order would have landed. Slow — a few trades a day — and never
+-- repeatable, which is exactly why it does not replace the replay.
+--
+-- One row. The wallet has to survive a service restart, or every deploy
+-- would silently reset the experiment.
+CREATE TABLE IF NOT EXISTS live_wallet (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    start_cash REAL NOT NULL,
+    cash REAL NOT NULL,                 -- spendable right now
+    locked REAL NOT NULL DEFAULT 0,     -- inside unsettled baskets
+    realised_profit REAL NOT NULL DEFAULT 0,
+    fees_paid REAL NOT NULL DEFAULT 0,
+    wins INTEGER NOT NULL DEFAULT 0,
+    losses INTEGER NOT NULL DEFAULT 0,
+    gross_profit REAL NOT NULL DEFAULT 0,
+    gross_loss REAL NOT NULL DEFAULT 0,
+    trades INTEGER NOT NULL DEFAULT 0,
+    settled INTEGER NOT NULL DEFAULT 0,
+    params TEXT                         -- JSON, the settings it runs under
+);
+
+-- A basket bought and not yet paid out.
+CREATE TABLE IF NOT EXISTS live_positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    opened_at TEXT NOT NULL,
+    event_slug TEXT,
+    event_title TEXT,
+    side TEXT,
+    num_outcomes INTEGER,
+    payout REAL,
+    fee_rate REAL,
+
+    shares REAL,
+    capital REAL,                       -- what the shares cost
+    fee REAL,
+    profit REAL,                        -- fixed at purchase, net of fee
+    entry_sum_asks REAL,
+
+    end_date TEXT,                      -- when the market is due to settle
+    settled_at TEXT,                    -- NULL while still held
+    settle_reason TEXT,                 -- 'resolved' | 'end_date'
+    url TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lpos_open ON live_positions(settled_at);
+CREATE INDEX IF NOT EXISTS idx_lpos_slug ON live_positions(event_slug);
+
+-- Every signal the wallet was offered, and what it did about it —
+-- including the refusals, which are most of them and carry the reason.
+CREATE TABLE IF NOT EXISTS live_decisions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    event_slug TEXT,
+    event_title TEXT,
+    side TEXT,
+    num_outcomes INTEGER,
+    payout REAL,
+    fee_rate REAL,
+
+    taken INTEGER NOT NULL DEFAULT 0,
+    reason TEXT,
+    position_id INTEGER,
+
+    -- The measurement this whole table exists for: how much of the edge
+    -- survived the delay between seeing it and being able to act.
+    signal_age_ms REAL,                 -- edge age when the signal fired
+    planned_delay_ms REAL,              -- the execution delay we waited out
+    total_ms REAL,                      -- signal open -> decision made
+    signal_edge REAL,                   -- the edge when the signal fired
+    entry_edge REAL,                    -- the edge when the order landed
+    signal_sum_asks REAL,
+    entry_sum_asks REAL,
+    fillable_capital REAL,
+
+    shares REAL,
+    capital REAL,
+    fee REAL,
+    profit REAL,
+
+    FOREIGN KEY (position_id) REFERENCES live_positions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_ldec_at ON live_decisions(at);
+CREATE INDEX IF NOT EXISTS idx_ldec_reason ON live_decisions(taken, reason);
+
+-- The same shape as paper_ledger, minus the run: there is only ever one
+-- live wallet, and its history is continuous.
+CREATE TABLE IF NOT EXISTS live_ledger (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,                   -- wall clock, this time
+    kind TEXT NOT NULL,                 -- 'buy' | 'settle'
+    position_id INTEGER,
+    event_slug TEXT,
+    event_title TEXT,
+
+    amount REAL NOT NULL,               -- signed
+    capital REAL,
+    fee REAL,
+    profit REAL,
+
+    balance_after REAL,
+    locked_after REAL,
+    equity_after REAL
+);
+CREATE INDEX IF NOT EXISTS idx_lled_at ON live_ledger(id);
+
 CREATE INDEX IF NOT EXISTS idx_tick_window ON edge_ticks(window_id, ts_ms);
 CREATE INDEX IF NOT EXISTS idx_tick_ts ON edge_ticks(ts_ms);
 
@@ -432,8 +549,16 @@ def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
-    db = sqlite3.connect(str(db_path))
+def connect(db_path: Path = DB_PATH, *,
+            check_same_thread: bool = True) -> sqlite3.Connection:
+    """
+    `check_same_thread=False` is for one caller only: the live paper
+    wallet, whose decisions run on whatever worker thread asyncio hands
+    them. It is safe there because that wallet serialises every statement
+    behind its own lock — without such a lock, turning this off trades a
+    loud error for silent corruption.
+    """
+    db = sqlite3.connect(str(db_path), check_same_thread=check_same_thread)
     db.row_factory = sqlite3.Row
 
     # Default SQLite fsyncs on every statement, which made opening a fresh

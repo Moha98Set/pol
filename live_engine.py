@@ -48,6 +48,7 @@ from websockets.exceptions import ConnectionClosed
 import arbmath
 import config
 import db as dblib
+import livewallet
 import notify
 import scanner
 
@@ -295,7 +296,7 @@ def fit_to_budget(candidates, budget: int):
 class LiveEngine:
     def __init__(self, *, top_n: int = None, min_edge: float = None,
                  capitals=None, on_signal: Callable[[dict], None] = None,
-                 store: bool = True):
+                 store: bool = True, paper: bool = None):
         self.top_n = config.LIVE_TOP_N if top_n is None else top_n
         self.min_edge = config.LIVE_MIN_EDGE if min_edge is None else min_edge
         self.capitals = capitals or config.TEST_CAPITALS
@@ -321,6 +322,25 @@ class LiveEngine:
             if orphans:
                 log.info("Closed %d window(s) left open by a previous run",
                          orphans)
+
+        # The paper wallet, if it is switched on. It takes over on_signal
+        # rather than sitting beside it: the callback is the executor's
+        # seat, and having two things in it would mean two different
+        # answers to "what did we do about this signal".
+        self.wallet = None
+        paper = config.PAPER_LIVE_ENABLED if paper is None else paper
+        if paper and self.db is not None:
+            # Its own connection, and one that tolerates being used from
+            # another thread: decisions run under asyncio.to_thread so the
+            # commit stays out of the socket loop, and that hands each one
+            # to whatever worker is free. The wallet serialises its own
+            # statements behind a lock.
+            self.wallet = livewallet.LiveWallet(
+                dblib.connect(check_same_thread=False), self.price)
+            if self.on_signal is not None:
+                log.warning("Paper wallet is on; replacing the on_signal "
+                            "callback with it.")
+            self.on_signal = self._paper_signal
 
     # -----------------------------------------------------------------
     # Watchlist
@@ -470,6 +490,15 @@ class LiveEngine:
             # a resolved leg can print absurd prices; stop watching it
             for slug in self.token_to_events.get(token_id, []):
                 self.events.pop(slug, None)
+                # Settle before forgetting the event. We hold the whole
+                # basket, so which outcome won does not change the payout —
+                # only that it is now due.
+                if self.wallet is not None:
+                    try:
+                        self.wallet.settle_event(slug)
+                    except Exception as e:
+                        log.error("Paper settlement failed for %s: %s",
+                                  slug, e)
             log.info("Market resolved, dropped from watchlist: %s", token_id)
 
     # -----------------------------------------------------------------
@@ -482,15 +511,15 @@ class LiveEngine:
             if watched is not None:
                 self._evaluate_event(watched)
 
-    def _evaluate_event(self, watched: WatchedEvent):
+    def price(self, watched: WatchedEvent):
         """
-        Check both baskets: buy the event for less than $1, or sell it for
-        more. They can never both be available — bids never exceed asks —
-        so at most one of these produces a signal.
-        """
-        self.stats["evals"] += 1
-        watched.last_eval = time.time()
+        The best basket available right now, as (side, result, edge).
 
+        Pure: reads the books and returns, touching no signal or window
+        state. The paper wallet calls this a second time, moments after a
+        signal fires, to price its entry against the book as it is then
+        rather than as it was when the edge appeared.
+        """
         candidates = []
 
         legs = watched.build_legs(self.books)
@@ -512,11 +541,23 @@ class LiveEngine:
                                    no_result["net_edge_per_dollar"]))
 
         if not candidates:
+            return None, None, None
+
+        return max(candidates, key=lambda c: c[2] if c[2] is not None else -9e9)
+
+    def _evaluate_event(self, watched: WatchedEvent):
+        """
+        Check both baskets: buy the event for less than $1, or sell it for
+        more. They can never both be available — bids never exceed asks —
+        so at most one of these produces a signal.
+        """
+        self.stats["evals"] += 1
+        watched.last_eval = time.time()
+
+        side, result, edge = self.price(watched)
+        if result is None:
             self._close_signal(watched, reason="leg_unavailable")
             return
-
-        side, result, edge = max(
-            candidates, key=lambda c: c[2] if c[2] is not None else -9e9)
 
         # Record before the threshold test, not after. Everything below
         # min_edge used to be discarded here, and that discarded set is
@@ -762,6 +803,52 @@ class LiveEngine:
             except Exception as e:
                 log.error("on_signal callback failed: %s", e, exc_info=True)
 
+    # -----------------------------------------------------------------
+    # Paper wallet
+    # -----------------------------------------------------------------
+
+    def _paper_signal(self, payload: dict):
+        """
+        Hand the signal to the wallet — after a real wait, not now.
+
+        The waiting is the point. A replay looks up the tick nearest its
+        estimate of execution latency; this schedules the decision that far
+        into the future and lets the market do whatever it does in the
+        meantime. If the edge is gone when the timer fires, that is a
+        measurement rather than an assumption.
+
+        It has to be a task: the callback runs inside the WebSocket read
+        loop, and sleeping here would stop every other book updating —
+        including the books this decision is waiting on.
+        """
+        watched = self.events.get(payload.get("event_slug"))
+        if watched is None:
+            return
+        delay_ms = livewallet.execution_delay_ms(payload.get("num_outcomes") or 2)
+        payload = dict(payload, planned_delay_ms=delay_ms)
+        asyncio.create_task(self._paper_decide(payload, watched, delay_ms))
+
+    async def _paper_decide(self, payload: dict, watched: WatchedEvent,
+                            delay_ms: float):
+        try:
+            await asyncio.sleep(delay_ms / 1000.0)
+            # to_thread because consider() writes to SQLite, and a commit
+            # in the event loop stalls every socket read behind an fsync
+            await asyncio.to_thread(self.wallet.consider, payload, watched)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("Paper wallet decision failed: %s", e, exc_info=True)
+
+    async def _settler(self):
+        """Return capital from baskets whose markets are past their end."""
+        while True:
+            await asyncio.sleep(config.PAPER_LIVE_SETTLE_INTERVAL)
+            try:
+                await asyncio.to_thread(self.wallet.settle_due)
+            except Exception as e:
+                log.error("Paper settlement sweep failed: %s", e)
+
     def _close_signal(self, watched: WatchedEvent, reason: str):
         signal = watched.signal
         if signal is None:
@@ -879,12 +966,18 @@ class LiveEngine:
             # invisible until it ends.
             if self.record:
                 self._flush_ticks()
+            extra = ""
+            if self.wallet is not None:
+                w = self.wallet
+                extra = (f" | wallet ${w.cash:,.2f} cash "
+                         f"+ ${w.locked:,.2f} locked "
+                         f"({w.state['trades']} trades)")
             log.info("stats | %d updates | %d evals | %d signals | %d open"
-                     " | %d windows (%d live) | %d ticks",
+                     " | %d windows (%d live) | %d ticks%s",
                      self.stats["updates"], self.stats["evals"],
                      self.stats["signals"], open_edges,
                      self.stats["windows"], open_windows,
-                     self.stats["ticks"])
+                     self.stats["ticks"], extra)
 
     async def _pruner(self):
         """Age out tick rows. Windows are kept — they are the record."""
@@ -908,6 +1001,12 @@ class LiveEngine:
         refresher = asyncio.create_task(self._refresher())
         reporter = asyncio.create_task(self._reporter())
         pruner = asyncio.create_task(self._pruner())
+        tasks = [refresher, reporter, pruner]
+        if self.wallet is not None:
+            # Catch up on anything that resolved while the service was down
+            # before taking on new positions.
+            await asyncio.to_thread(self.wallet.settle_due)
+            tasks.append(asyncio.create_task(self._settler()))
 
         try:
             while True:
@@ -932,9 +1031,8 @@ class LiveEngine:
                         self._close_window(watched, now, None)
                     self._resubscribe.clear()
         finally:
-            refresher.cancel()
-            reporter.cancel()
-            pruner.cancel()
+            for task in tasks:
+                task.cancel()
             if self.record:
                 for watched in self.events.values():
                     self._close_window(watched, time.time(), None)
@@ -955,6 +1053,11 @@ def main():
                         help="minimum net edge to open a signal")
     parser.add_argument("--no-store", action="store_true",
                         help="do not write signals to the database")
+    parser.add_argument("--paper", dest="paper", action="store_true",
+                        default=None,
+                        help="run the live paper wallet on real signals")
+    parser.add_argument("--no-paper", dest="paper", action="store_false",
+                        help="observe only, whatever the config says")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -965,9 +1068,14 @@ def main():
     )
 
     engine = LiveEngine(top_n=args.top, min_edge=args.min_edge,
-                        store=not args.no_store)
+                        store=not args.no_store, paper=args.paper)
 
-    log.info("Live engine starting — OBSERVE ONLY, no orders will be placed.")
+    if engine.wallet is not None:
+        log.info("Live engine starting — PAPER WALLET ON. Still no real "
+                 "orders: it decides and books trades with fake money.")
+    else:
+        log.info("Live engine starting — OBSERVE ONLY, no orders will be "
+                 "placed.")
     try:
         asyncio.run(engine.run())
     except KeyboardInterrupt:
