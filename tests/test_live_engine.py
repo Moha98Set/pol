@@ -960,3 +960,97 @@ def test_observe_only_stays_observe_only_by_default(tmp_path, monkeypatch):
     eng = LiveEngine(store=False, capitals=[100], min_edge=0.003)
     assert eng.wallet is None
     assert eng.on_signal is None
+
+
+# =====================================================================
+# Reporting what is not watched
+# =====================================================================
+#
+# Two different cuts remove events, and confusing them sends the operator
+# to the wrong setting: raising MAX_TOKENS_PER_SOCKET does nothing about
+# events that LIVE_TOP_N already discarded.
+
+
+def _watchlist_warning(engine, monkeypatch, *, eligible, top_n, budget,
+                       legs_per_event=2):
+    """
+    Run the real build_watchlist with the network stubbed out, and return
+    the warning it logged.
+
+    Stubbing the scanner rather than reimplementing the selection matters:
+    a test that recomputes what build_watchlist does would keep passing
+    after build_watchlist changed.
+    """
+    import live_engine as le
+
+    engine.top_n = top_n
+    monkeypatch.setattr(le, "MAX_TOKENS_PER_SOCKET", budget)
+
+    events = [{"slug": f"e{i}", "title": f"E{i}"} for i in range(eligible)]
+    monkeypatch.setattr(le.scanner, "fetch_all_events", lambda: events)
+    monkeypatch.setattr(le.scanner, "prefilter_event", lambda e: {
+        "event": e, "is_binary": False, "fee_rate": 0.0,
+        "markets": [{"slug": e["slug"], "leg": j}
+                    for j in range(legs_per_event)],
+    })
+    monkeypatch.setattr(le.scanner, "parse_token_ids",
+                        lambda m: [f"{m['slug']}-{m['leg']}",
+                                   f"{m['slug']}-{m['leg']}-no"])
+    monkeypatch.setattr(le.scanner, "fetch_order_books",
+                        lambda tokens: {t: {} for t in tokens})
+    # every leg priced so the basket sums just under 1.0 and passes the
+    # proximity filter
+    price = 0.99 / legs_per_event
+    monkeypatch.setattr(le.scanner, "get_valid_asks",
+                        lambda book: [(price, 500.0)])
+
+    messages = []
+    monkeypatch.setattr(le.log, "warning",
+                        lambda msg, *a: messages.append(msg % a))
+    monkeypatch.setattr(le.log, "info", lambda msg, *a: None)
+
+    engine.build_watchlist()
+    return messages[0] if messages else ""
+
+
+def test_events_cut_by_top_n_are_counted_not_silently_lost(engine, monkeypatch):
+    """
+    30 eligible, top_n 10, budget enormous: 20 are unwatched and none of
+    them because of tokens.
+    """
+    msg = _watchlist_warning(engine, monkeypatch,
+                             eligible=30, top_n=10, budget=10_000)
+
+    assert "20 event(s) left unwatched" in msg
+    assert "20 past LIVE_TOP_N" in msg
+    assert "0 over the token budget" in msg
+
+
+def test_the_advice_matches_which_limit_actually_bound(engine, monkeypatch):
+    """
+    Telling someone to raise MAX_TOKENS_PER_SOCKET when LIVE_TOP_N is what
+    cut the events sends them to a setting that changes nothing.
+    """
+    msg = _watchlist_warning(engine, monkeypatch,
+                             eligible=30, top_n=10, budget=10_000)
+    assert "raise LIVE_TOP_N" in msg
+    assert "raise MAX_TOKENS_PER_SOCKET" not in msg
+
+
+def test_a_token_shortage_still_points_at_the_token_budget(engine, monkeypatch):
+    msg = _watchlist_warning(engine, monkeypatch,
+                             eligible=10, top_n=100, budget=6)
+
+    assert "0 past LIVE_TOP_N" in msg
+    assert "7 over the token budget" in msg
+    assert "raise MAX_TOKENS_PER_SOCKET" in msg
+    assert "raise LIVE_TOP_N" not in msg
+
+
+def test_both_limits_binding_at_once_are_both_reported(engine, monkeypatch):
+    msg = _watchlist_warning(engine, monkeypatch,
+                             eligible=30, top_n=10, budget=6)
+
+    assert "27 event(s) left unwatched" in msg
+    assert "20 past LIVE_TOP_N" in msg
+    assert "7 over the token budget" in msg

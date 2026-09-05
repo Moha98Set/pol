@@ -410,14 +410,30 @@ class LiveEngine:
         # books never filled, build_legs always returned None, and it sat
         # in the watchlist producing nothing. The log still counted it as
         # watched. Better to watch fewer events completely and say so.
-        chosen, dropped = fit_to_budget(
+        # Two separate cuts, and the warning has to name both. LIVE_TOP_N
+        # takes the ranked head; the token budget then drops whole events
+        # that will not fit. Reporting only the second understates how many
+        # events are unwatched whenever there are more eligible than
+        # top_n — and it says to raise MAX_TOKENS_PER_SOCKET, which in that
+        # case changes nothing at all.
+        by_rank = len(scored) - min(len(scored), self.top_n)
+        chosen, by_budget = fit_to_budget(
             [we for _s, we in scored[:self.top_n]], MAX_TOKENS_PER_SOCKET)
 
-        if dropped:
+        if by_budget or by_rank:
+            fix = []
+            if by_budget:
+                fix.append("raise MAX_TOKENS_PER_SOCKET (%d/%d used)"
+                           % (sum(len(we.token_ids) for we in chosen),
+                              MAX_TOKENS_PER_SOCKET))
+            if by_rank:
+                fix.append("raise LIVE_TOP_N (currently %d)" % self.top_n)
             log.warning(
-                "Token budget full: %d event(s) left unwatched. Raise "
-                "MAX_TOKENS_PER_SOCKET or lower LIVE_TOP_N — a partly "
-                "subscribed event would never produce a signal.", dropped)
+                "%d event(s) left unwatched: %d past LIVE_TOP_N, %d over the "
+                "token budget. To widen coverage, %s. A partly subscribed "
+                "event would never produce a signal, so whole events are "
+                "dropped rather than trimmed.",
+                by_rank + by_budget, by_rank, by_budget, "; ".join(fix))
 
         self.events = {we.slug: we for we in chosen}
         self.token_to_events = {}
