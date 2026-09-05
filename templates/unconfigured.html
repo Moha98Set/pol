@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>پیکربندی ناقص</title>
 <style>
-body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0e1117;
-     color:#e6edf3;font-family:"Segoe UI",Tahoma,Vazirmatn,system-ui,sans-serif;padding:24px}
-.box{max-width:600px;background:#161b22;border:1px solid #2a313c;border-radius:14px;padding:32px;line-height:1.95}
-h1{font-size:20px;margin:0 0 14px}
-code{background:#0e1117;border:1px solid #2a313c;border-radius:6px;padding:2px 7px;
+/* This page is served before any config exists, so it carries its own
+   copy of the palette rather than extending base.html. */
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+     background:#FBFAF6;color:#22282C;text-align:right;
+     font-family:Vazirmatn,"Segoe UI",Tahoma,system-ui,sans-serif;padding:24px;font-size:16px}
+.box{max-width:620px;background:linear-gradient(160deg,#FFFFFF 0%,#F2EDE1 100%);
+     border:1px solid #E4E0D6;border-radius:10px;padding:34px;line-height:2}
+h1{font-size:24px;margin:0 0 16px;line-height:1.5}
+code{background:#FFFFFF;border:1px solid #E4E0D6;border-radius:6px;padding:2px 7px;
      font-family:"SF Mono",Menlo,Consolas,monospace;font-size:13px;direction:ltr;display:inline-block}
-pre{background:#0e1117;border:1px solid #2a313c;border-radius:9px;padding:14px;overflow-x:auto;
-    direction:ltr;text-align:left;font-size:13px;font-family:"SF Mono",Menlo,Consolas,monospace}
+pre{background:#FFFFFF;border:1px solid #E4E0D6;border-radius:10px;padding:15px;overflow-x:auto;
+    direction:ltr;text-align:left;font-size:13px;line-height:1.75;
+    font-family:"SF Mono",Menlo,Consolas,monospace}
 </style>
 </head>
 <body>

@@ -25,47 +25,74 @@
   src:url("/static/fonts/Vazirmatn-700.woff2") format("woff2");
 }
 
-/* Light is the base; dark only redefines the tokens. Declaring both on
-   :root and under the media query means the toggle wins in either
-   direction and the untouched default still follows the OS. */
+/* Warm paper rather than cold slate: bone-white ground, pine green as the
+   single accent, sand for secondary surfaces, no shadows anywhere —
+   separation is a 1px line. The token NAMES are unchanged, so every
+   template and every inline var() keeps working; only the values moved.
+
+   Two colours are deliberately not the design's own. Amber is #8F5E1C
+   instead of #A8722C, because fee figures are rendered in it at 14px and
+   the lighter tone sits at 4.1:1 on white, under the 4.5 needed to read;
+   #A8722C survives as --warn-line for borders, where contrast does not
+   apply. And a brick red had to be invented, because the palette has no
+   red at all and a financial dashboard cannot show a loss in the same
+   colour as a caution. */
 :root{
-  --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f0f2f5;
-  --text:#111826; --muted:#5b6676; --border:#dde2e9;
-  --accent:#1f6feb; --accent-soft:#e7f0fe;
-  --good:#12805c; --good-soft:#e3f5ee;
-  --warn:#9a6700; --warn-soft:#fff4d6;
-  --bad:#b3261e;  --bad-soft:#fdeceb;
-  --shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.1);
+  --bg:#FBFAF6; --surface:#FFFFFF; --surface-2:#F2EDE1;
+  --text:#22282C; --muted:#55606A; --faint:#8B959E; --border:#E4E0D6;
+  --accent:#2E6B55; --accent-soft:#EDF4F0;
+  --good:#2E6B55;  --good-soft:#EDF4F0;
+  --warn:#8F5E1C;  --warn-soft:#FBF3E6; --warn-line:#A8722C;
+  --bad:#A33A2E;   --bad-soft:#FAEDEA;
+  --info:#3A6183;  --info-soft:#EDF2F7;
+  --radius:10px;
+  /* The design asks for no shadows. Kept as a token because templates
+     reference it; setting it to none is how the rule is enforced. */
+  --shadow:none;
+  color-scheme:light;
 }
+/* Dark stays, because the analysts asked for it and it is a feature, but
+   it is derived from the same hues — warm charcoal, not the blue-grey it
+   used to be — so the identity survives the toggle. */
 @media (prefers-color-scheme:dark){
   :root:not([data-theme="light"]){
-    --bg:#0e1117; --surface:#161b22; --surface-2:#1c232c;
-    --text:#e6edf3; --muted:#9198a1; --border:#2a313c;
-    --accent:#4c8dff; --accent-soft:#16243d;
-    --good:#3fb950; --good-soft:#12261a;
-    --warn:#d29922; --warn-soft:#2b2413;
-    --bad:#f85149;  --bad-soft:#2d1618;
-    --shadow:0 1px 2px rgba(0,0,0,.4);
+    --bg:#1A1917; --surface:#211F1D; --surface-2:#2A2724;
+    --text:#ECE8E0; --muted:#A9A399; --faint:#7E786F; --border:#35322D;
+    --accent:#6FBF9B; --accent-soft:#1C2C25;
+    --good:#6FBF9B;  --good-soft:#1C2C25;
+    --warn:#D9A05B;  --warn-soft:#2C2418; --warn-line:#8A6634;
+    --bad:#E08276;   --bad-soft:#2E1D1A;
+    --info:#8CB0D2;  --info-soft:#1B242E;
+    color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0e1117; --surface:#161b22; --surface-2:#1c232c;
-  --text:#e6edf3; --muted:#9198a1; --border:#2a313c;
-  --accent:#4c8dff; --accent-soft:#16243d;
-  --good:#3fb950; --good-soft:#12261a;
-  --warn:#d29922; --warn-soft:#2b2413;
-  --bad:#f85149;  --bad-soft:#2d1618;
-  --shadow:0 1px 2px rgba(0,0,0,.4);
+  --bg:#1A1917; --surface:#211F1D; --surface-2:#2A2724;
+  --text:#ECE8E0; --muted:#A9A399; --faint:#7E786F; --border:#35322D;
+  --accent:#6FBF9B; --accent-soft:#1C2C25;
+  --good:#6FBF9B;  --good-soft:#1C2C25;
+  --warn:#D9A05B;  --warn-soft:#2C2418; --warn-line:#8A6634;
+  --bad:#E08276;   --bad-soft:#2E1D1A;
+  --info:#8CB0D2;  --info-soft:#1B242E;
+  color-scheme:dark;
 }
 
 *{box-sizing:border-box}
 body{
   margin:0; background:var(--bg); color:var(--text);
   font-family:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;
-  font-size:15px; line-height:1.75;
+  font-size:16px; line-height:2;
+  /* Right-aligned, never justified: justification opens rivers in Persian
+     text far worse than in Latin, because the joins stretch. */
+  text-align:right;
 }
 a{color:var(--accent); text-decoration:none}
 a:hover{text-decoration:underline}
+/* Every interactive element has to show where the keyboard is. */
+a:focus-visible,button:focus-visible,select:focus-visible,
+input:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent); outline-offset:2px; border-radius:4px;
+}
 
 /* Latin numerals inside a Persian page: prices and edges are compared
    digit by digit, and mixing numeral systems makes columns unreadable.
@@ -80,91 +107,171 @@ a:hover{text-decoration:underline}
 span.num,a.num{display:inline-block}
 td.num,th.num{text-align:left}
 
+/* The masthead reads as the cover strip of a printed report: a warm
+   gradient into sand, ruled off from the body by a single line. */
 header{
-  background:var(--surface); border-bottom:1px solid var(--border);
+  background:linear-gradient(160deg,var(--surface) 0%,var(--surface-2) 100%);
+  border-bottom:1px solid var(--border);
   position:sticky; top:0; z-index:10;
 }
-.bar{display:flex; align-items:center; gap:18px; padding:10px 22px; flex-wrap:wrap}
-.brand{font-weight:700; font-size:17px; margin-inline-end:auto}
+.bar{display:flex; align-items:center; gap:18px; padding:12px 26px; flex-wrap:wrap}
+.brand{font-weight:700; font-size:18px; margin-inline-end:auto; line-height:1.5}
 .brand small{color:var(--muted); font-weight:400; font-size:13px}
-nav{display:flex; gap:4px; flex-wrap:wrap}
+nav{display:flex; gap:3px; flex-wrap:wrap}
 nav a{
-  padding:7px 13px; border-radius:8px; color:var(--muted); font-size:14px;
+  padding:6px 13px; border-radius:6px; color:var(--muted); font-size:14px;
+  line-height:1.8; border:1px solid transparent;
 }
-nav a:hover{background:var(--surface-2); text-decoration:none}
-nav a.on{background:var(--accent-soft); color:var(--accent); font-weight:600}
+nav a:hover{background:var(--surface); border-color:var(--border); text-decoration:none}
+nav a.on{background:var(--accent-soft); color:var(--accent); font-weight:600;
+         border-color:var(--border)}
+/* Kept together so a wrap moves both buttons, not one — the theme toggle
+   stranded on a row of its own was the shape the old header wrapped into. */
+.actions{display:flex; gap:8px; align-items:center; flex:none}
+.actions button,.actions .btn{padding:7px 15px; font-size:13.5px}
 
-main{max-width:1280px; margin:0 auto; padding:24px 22px 60px}
-h1{font-size:22px; margin:0 0 4px}
-h2{font-size:17px; margin:28px 0 12px}
-.sub{color:var(--muted); font-size:14px; margin:0 0 22px}
+main{max-width:1180px; margin:0 auto; padding:30px 26px 72px}
 
-.cards{display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:14px; margin-bottom:26px}
+h1{font-size:clamp(26px,3.4vw,34px); margin:0 0 6px; line-height:1.45;
+   font-weight:700; letter-spacing:-.2px}
+/* A section title, ruled underneath, with an optional number badge that a
+   template supplies as <i>. */
+h2{font-size:20px; margin:36px 0 14px; font-weight:700; line-height:1.6;
+   padding-bottom:9px; border-bottom:1px solid var(--border);
+   display:flex; align-items:center; gap:10px}
+/* inline-block with a margin rather than a flex gap, so the same badge
+   works in a section title and in a panel header, which is display:block */
+h2 > i{
+  font-style:normal; font-size:13px; font-weight:700; display:inline-block;
+  background:var(--accent-soft); color:var(--accent); border:1px solid var(--border);
+  border-radius:6px; padding:0 9px; line-height:1.9; flex:none;
+  margin-inline-end:9px; vertical-align:2px;
+}
+h3{font-size:17.5px; margin:24px 0 8px; font-weight:700; line-height:1.7}
+/* Prose is capped so lines stay readable; tables and grids are not. */
+p,.sub,.panel .body > p{max-width:78ch}
+.sub{color:var(--muted); font-size:14.5px; margin:0 0 24px; line-height:1.95}
+
+.cards{display:grid; grid-template-columns:repeat(auto-fill,minmax(238px,1fr));
+       gap:14px; margin-bottom:30px}
 .card{
-  background:var(--surface); border:1px solid var(--border); border-radius:12px;
-  padding:15px 17px; box-shadow:var(--shadow);
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); padding:16px 18px;
 }
-.card .k{color:var(--muted); font-size:13px}
-.card .v{font-size:25px; font-weight:700; margin-top:3px}
+.card .k{color:var(--faint); font-size:13px; line-height:1.8}
+.card .v{font-size:26px; font-weight:700; margin-top:2px; line-height:1.5}
 .card .v.good{color:var(--good)} .card .v.bad{color:var(--bad)} .card .v.warn{color:var(--warn)}
-.card .note{color:var(--muted); font-size:12px; margin-top:2px}
+.card .note{color:var(--muted); font-size:12.5px; margin-top:3px; line-height:1.7}
 
 .panel{
-  background:var(--surface); border:1px solid var(--border); border-radius:12px;
-  box-shadow:var(--shadow); overflow:hidden; margin-bottom:24px;
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); overflow:hidden; margin-bottom:26px;
 }
-.panel > h2{margin:0; padding:14px 17px; border-bottom:1px solid var(--border); font-size:15px}
-.panel .body{padding:17px}
+/* A panel header is a bar, not a section title, so it keeps its own
+   smaller scale and loses the h2 rule and badge layout. */
+.panel > h2{
+  margin:0; padding:13px 18px; font-size:16px; font-weight:700;
+  background:var(--surface-2); border-bottom:1px solid var(--border);
+  display:block;
+}
+.panel .body{padding:18px; font-size:15px}
+
+/* Note blocks. Three states, used sparingly: amber for a condition or a
+   caveat that changes what a number means, pine for something confirmed,
+   blue for neutral explanation. */
+.note-block{
+  border:1px solid var(--border); border-radius:var(--radius);
+  padding:15px 18px; margin:0 0 20px; font-size:15px; line-height:1.95;
+  max-width:78ch;
+}
+.note-block .t{display:block; font-weight:700; font-size:14px; margin-bottom:4px}
+.note-block.key{background:var(--warn-soft); border-color:var(--warn-line)}
+.note-block.key .t{color:var(--warn)}
+.note-block.calm{background:var(--good-soft); border-color:var(--accent)}
+.note-block.calm .t{color:var(--accent)}
+.note-block.info{background:var(--info-soft); border-color:var(--info)}
+.note-block.info .t{color:var(--info)}
 
 .scroll{overflow-x:auto}
-table{width:100%; border-collapse:collapse; font-size:14px}
-th,td{padding:10px 13px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
-th{background:var(--surface-2); color:var(--muted); font-weight:600; font-size:13px; position:sticky; top:0}
+/* Tables sit inside .panel, which already supplies the 1px frame, the
+   10px radius and overflow:hidden the design asks for. A bare table gets
+   its own frame instead. */
+table{width:100%; border-collapse:collapse; font-size:14.5px; line-height:1.7}
+:not(.panel) > .scroll > table,
+main > table{border:1px solid var(--border); border-radius:var(--radius); overflow:hidden}
+th,td{padding:11px 14px; text-align:right; border-bottom:1px solid var(--border); white-space:nowrap}
+th{background:var(--surface-2); color:var(--muted); font-weight:700; font-size:13px;
+   position:sticky; top:0; line-height:1.8}
 /* grouped header: the top row labels a span of columns below it */
 thead tr:first-child th[colspan]{
-  border-bottom:1px solid var(--border); font-size:12px; opacity:.85;
+  border-bottom:1px solid var(--border); font-size:12px; color:var(--faint);
 }
-tbody tr:hover{background:var(--surface-2)}
-td.wrap{white-space:normal; min-width:260px; max-width:440px}
+tbody tr:hover{background:var(--bg)}
+td.wrap{white-space:normal; min-width:260px; max-width:440px; line-height:1.8}
 tr:last-child td{border-bottom:none}
 
 .tag{
-  display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px;
+  display:inline-block; padding:1px 9px; border-radius:6px; font-size:12px;
   background:var(--surface-2); color:var(--muted); border:1px solid var(--border);
-  white-space:nowrap;
+  white-space:nowrap; line-height:1.85;
 }
-.tag.good{background:var(--good-soft); color:var(--good); border-color:transparent}
-.tag.warn{background:var(--warn-soft); color:var(--warn); border-color:transparent}
-.tag.bad{background:var(--bad-soft); color:var(--bad); border-color:transparent}
-.tag.info{background:var(--accent-soft); color:var(--accent); border-color:transparent}
-.tag[title]{cursor:help; border-bottom:1px dotted currentColor}
+.tag.good{background:var(--good-soft); color:var(--good); border-color:var(--accent)}
+.tag.warn{background:var(--warn-soft); color:var(--warn); border-color:var(--warn-line)}
+.tag.bad{background:var(--bad-soft); color:var(--bad); border-color:var(--bad)}
+.tag.info{background:var(--info-soft); color:var(--info); border-color:var(--info)}
+.tag[title]{cursor:help}
 
-form.filters{display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:18px}
+form.filters{display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:20px}
 .field{display:flex; flex-direction:column; gap:4px}
-.field label{font-size:12px; color:var(--muted)}
+.field label{font-size:12px; color:var(--faint); line-height:1.7}
 select,input[type=text],input[type=password],input[type=number]{
   background:var(--surface); color:var(--text); border:1px solid var(--border);
-  border-radius:8px; padding:8px 11px; font:inherit; font-size:14px; min-width:130px;
+  border-radius:6px; padding:8px 11px; font:inherit; font-size:14px; min-width:130px;
+  line-height:1.8;
 }
 button,.btn{
-  background:var(--accent); color:#fff; border:0; border-radius:8px;
-  padding:9px 17px; font:inherit; font-size:14px; cursor:pointer;
+  background:var(--accent); color:#fff; border:1px solid var(--accent);
+  border-radius:6px; padding:9px 18px; font:inherit; font-size:14px;
+  cursor:pointer; line-height:1.8;
 }
-button.ghost,.btn.ghost{background:var(--surface-2); color:var(--text); border:1px solid var(--border)}
-button:hover,.btn:hover{opacity:.9; text-decoration:none}
+button.ghost,.btn.ghost{background:var(--surface); color:var(--text); border-color:var(--border)}
+button:hover,.btn:hover{opacity:.88; text-decoration:none}
+button.ghost:hover,.btn.ghost:hover{opacity:1; background:var(--surface-2)}
 
-.pager{display:flex; gap:8px; align-items:center; justify-content:center; margin-top:20px; color:var(--muted); font-size:14px}
+.pager{display:flex; gap:8px; align-items:center; justify-content:center;
+       margin-top:22px; color:var(--muted); font-size:14px}
 
-.empty{padding:44px 20px; text-align:center; color:var(--muted)}
-.empty .big{font-size:16px; color:var(--text); margin-bottom:6px}
+.empty{padding:48px 22px; text-align:center; color:var(--muted); line-height:1.95}
+.empty .big{font-size:16.5px; color:var(--text); margin-bottom:6px; font-weight:700}
 
-.flash{background:var(--bad-soft); color:var(--bad); padding:11px 15px; border-radius:9px; margin-bottom:16px; font-size:14px}
+.flash{background:var(--bad-soft); color:var(--bad); border:1px solid var(--bad);
+       padding:12px 16px; border-radius:var(--radius); margin-bottom:18px; font-size:14.5px}
 
-.bar-row{display:flex; align-items:center; gap:11px; margin:7px 0}
-.bar-row .label{min-width:190px; font-size:14px}
-.bar-row .track{flex:1; background:var(--surface-2); border-radius:5px; height:9px; overflow:hidden}
-.bar-row .fill{height:100%; background:var(--accent); border-radius:5px}
+.bar-row{display:flex; align-items:center; gap:12px; margin:8px 0}
+.bar-row .label{min-width:190px; font-size:14px; line-height:1.8}
+.bar-row .track{flex:1; background:var(--surface-2); border-radius:3px; height:9px;
+                overflow:hidden; border:1px solid var(--border)}
+.bar-row .fill{height:100%; background:var(--accent)}
 .bar-row .n{min-width:92px; color:var(--muted); font-size:13px; text-align:left}
+
+/* A process chain: first and last node filled, the rest outlined. */
+.chain{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:4px 0 6px}
+.chain b{
+  font-weight:500; font-size:14px; background:var(--surface);
+  border:1px solid var(--border); border-radius:8px; padding:5px 13px;
+  line-height:1.8;
+}
+.chain b:first-child,.chain b:last-child{
+  background:var(--accent); border-color:var(--accent); color:#fff; font-weight:700;
+}
+.chain s{text-decoration:none; color:var(--faint); font-size:15px}
+
+/* Two columns for an in-scope / out-of-scope comparison. */
+.split{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:14px}
+.split > div{border:1px solid var(--border); border-radius:var(--radius); padding:15px 18px}
+.split > .yes{background:var(--good-soft)}
+.split > .no{background:var(--surface-2)}
+.split .t{font-weight:700; font-size:15px; margin-bottom:6px; display:block}
 
 /* Sortable headers and the numeric range panel */
 th a.sortlink{color:var(--muted); display:inline-flex; gap:4px; align-items:center}
@@ -173,12 +280,12 @@ th a.sortlink.on{color:var(--accent); font-weight:700}
 th .arrow{font-size:11px; width:9px; display:inline-block}
 
 details.rangebox{
-  background:var(--surface); border:1px solid var(--border); border-radius:12px;
-  margin-bottom:18px; box-shadow:var(--shadow);
+  background:var(--surface); border:1px solid var(--border);
+  border-radius:var(--radius); margin-bottom:20px;
 }
 details.rangebox > summary{
-  padding:12px 17px; cursor:pointer; font-size:14px; color:var(--muted);
-  display:flex; align-items:center; gap:9px; user-select:none;
+  padding:12px 18px; cursor:pointer; font-size:14px; color:var(--muted);
+  display:flex; align-items:center; gap:9px; user-select:none; line-height:1.8;
 }
 details.rangebox > summary:hover{color:var(--text)}
 details.rangebox[open] > summary{border-bottom:1px solid var(--border)}
@@ -191,13 +298,13 @@ details.rangebox[open] > summary{border-bottom:1px solid var(--border)}
 .rangeactions{display:flex; gap:9px; margin-top:15px}
 .rangetabs{display:flex; gap:5px; flex-wrap:wrap; margin-bottom:16px}
 .rangetabs a{
-  padding:6px 14px; border-radius:8px; font-size:13px; color:var(--muted);
-  background:var(--surface-2); border:1px solid var(--border);
+  padding:6px 14px; border-radius:6px; font-size:13px; color:var(--muted);
+  background:var(--surface); border:1px solid var(--border); line-height:1.8;
 }
-.rangetabs a:hover{color:var(--text); text-decoration:none}
-.rangetabs a.on{background:var(--accent); color:#fff; border-color:transparent; font-weight:600}
+.rangetabs a:hover{color:var(--text); background:var(--surface-2); text-decoration:none}
+.rangetabs a.on{background:var(--accent); color:#fff; border-color:var(--accent); font-weight:700}
 .axis{display:flex; justify-content:space-between; align-items:center;
-      color:var(--muted); font-size:12px; margin-top:8px; gap:12px; flex-wrap:wrap}
+      color:var(--faint); font-size:12px; margin-top:8px; gap:12px; flex-wrap:wrap}
 
 .timerow{display:flex; gap:14px; flex-wrap:wrap}
 .timerow .rangecol{min-width:170px}
@@ -215,9 +322,43 @@ pre.logs{
 }
 
 .spark{display:block; width:100%; height:60px}
-.dl{display:grid; grid-template-columns:auto 1fr; gap:8px 20px; font-size:14px}
+.dl{display:grid; grid-template-columns:auto 1fr; gap:8px 20px; font-size:14.5px}
 .dl dt{color:var(--muted)}
 .dl dd{margin:0}
+
+/* Below 920px the nav becomes a horizontal strip of chips that scrolls
+   rather than wrapping into four ragged rows. */
+@media (max-width:920px){
+  .bar{padding:10px 14px; gap:12px}
+  main{padding:22px 14px 56px}
+  nav{
+    order:3; width:100%; flex-wrap:nowrap; overflow-x:auto;
+    padding-bottom:2px; -webkit-overflow-scrolling:touch;
+  }
+  nav a{flex:none}
+  h2{font-size:18px; margin-top:28px}
+  .cards{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}
+  .bar-row .label{min-width:120px; font-size:13px}
+}
+
+/* An analyst printing a page for a meeting should get the report, not the
+   chrome: no navigation, no filter controls, black on white, and sections
+   that do not break across a page. */
+@media print{
+  :root{
+    --bg:#fff; --surface:#fff; --surface-2:#f4f2ec;
+    --text:#000; --muted:#333; --faint:#555; --border:#bbb;
+    --accent:#1d4a3a; --good:#1d4a3a; --warn:#6b4712; --bad:#7d2b21;
+  }
+  header,form.filters,details.rangebox,.rangetabs,.pager{display:none !important}
+  body{font-size:12pt; line-height:1.7; background:#fff}
+  main{max-width:none; padding:0}
+  .panel,.card,.note-block,.split > div{break-inside:avoid; page-break-inside:avoid}
+  h1,h2,h3{break-after:avoid; page-break-after:avoid}
+  .scroll{overflow:visible}
+  table{font-size:10pt}
+  a{color:#000; text-decoration:none}
+}
 </style>
 </head>
 <body>
@@ -240,8 +381,10 @@ pre.logs{
       <a href="{{ url_for('system') }}"        class="{{ 'on' if p.startswith('/system') }}">سیستم</a>
       <a href="{{ url_for('glossary_page') }}" class="{{ 'on' if p.startswith('/glossary') }}">واژه‌نامه</a>
     </nav>
-    <button class="ghost" onclick="toggleTheme()" id="themeBtn" title="تغییر تم">تم</button>
-    <a class="btn ghost" href="{{ url_for('logout') }}">خروج</a>
+    <div class="actions">
+      <button class="ghost" onclick="toggleTheme()" id="themeBtn" title="تغییر تم">تم</button>
+      <a class="btn ghost" href="{{ url_for('logout') }}">خروج</a>
+    </div>
   </div>
 </header>
 

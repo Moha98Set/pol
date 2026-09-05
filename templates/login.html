@@ -5,9 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ورود — داشبورد آربیتراژ</title>
 <style>
-:root{--bg:#f6f7f9;--surface:#fff;--text:#111826;--muted:#5b6676;--border:#dde2e9;--accent:#1f6feb;--bad:#b3261e;--bad-soft:#fdeceb}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1117;--surface:#161b22;--text:#e6edf3;--muted:#9198a1;--border:#2a313c;--accent:#4c8dff;--bad:#f85149;--bad-soft:#2d1618}}
-:root[data-theme="dark"]{--bg:#0e1117;--surface:#161b22;--text:#e6edf3;--muted:#9198a1;--border:#2a313c;--accent:#4c8dff;--bad:#f85149;--bad-soft:#2d1618}
+:root{--bg:#FBFAF6;--surface:#FFFFFF;--sand:#F2EDE1;--text:#22282C;--muted:#55606A;
+      --faint:#8B959E;--border:#E4E0D6;--accent:#2E6B55;--bad:#A33A2E;--bad-soft:#FAEDEA;
+      color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+      --bg:#1A1917;--surface:#211F1D;--sand:#2A2724;--text:#ECE8E0;--muted:#A9A399;
+      --faint:#7E786F;--border:#35322D;--accent:#6FBF9B;--bad:#E08276;--bad-soft:#2E1D1A;
+      color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1A1917;--surface:#211F1D;--sand:#2A2724;--text:#ECE8E0;
+      --muted:#A9A399;--faint:#7E786F;--border:#35322D;--accent:#6FBF9B;--bad:#E08276;
+      --bad-soft:#2E1D1A;color-scheme:dark}
 @font-face{font-family:"Vazirmatn";font-style:normal;font-weight:400;font-display:swap;
            src:url("/static/fonts/Vazirmatn-400.woff2") format("woff2")}
 @font-face{font-family:"Vazirmatn";font-style:normal;font-weight:700;font-display:swap;
@@ -16,18 +23,24 @@
 body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
      background:var(--bg);color:var(--text);
      font-family:"Vazirmatn","Segoe UI",Tahoma,system-ui,sans-serif;padding:20px}
-.box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:32px;width:100%;max-width:370px;
-     box-shadow:0 4px 14px rgba(16,24,40,.08)}
-h1{font-size:19px;margin:0 0 5px}
-p.sub{color:var(--muted);font-size:14px;margin:0 0 22px}
-label{display:block;font-size:13px;color:var(--muted);margin:14px 0 5px}
-input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;
-      background:var(--bg);color:var(--text);font:inherit;font-size:15px}
-button{width:100%;margin-top:22px;padding:11px;border:0;border-radius:9px;background:var(--accent);
-       color:#fff;font:inherit;font-size:15px;cursor:pointer}
-button:hover{opacity:.92}
-.flash{background:var(--bad-soft);color:var(--bad);padding:10px 13px;border-radius:8px;font-size:14px;margin-bottom:16px}
-.note{color:var(--muted);font-size:12px;margin-top:20px;line-height:1.6}
+/* No shadow: the card is separated by its rule, like everything else. The
+   gradient is the same one the masthead uses, so the first screen already
+   says which document this is. */
+.box{background:linear-gradient(160deg,var(--surface) 0%,var(--sand) 100%);
+     border:1px solid var(--border);border-radius:10px;padding:34px;width:100%;max-width:380px}
+h1{font-size:24px;margin:0 0 6px;line-height:1.5}
+p.sub{color:var(--muted);font-size:14.5px;margin:0 0 24px;line-height:1.9}
+label{display:block;font-size:12.5px;color:var(--faint);margin:15px 0 5px}
+input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:6px;
+      background:var(--surface);color:var(--text);font:inherit;font-size:15px}
+input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button{width:100%;margin-top:24px;padding:11px;border:1px solid var(--accent);border-radius:6px;
+       background:var(--accent);color:#fff;font:inherit;font-size:15px;cursor:pointer}
+button:hover{opacity:.88}
+button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.flash{background:var(--bad-soft);color:var(--bad);border:1px solid var(--bad);
+       padding:11px 14px;border-radius:10px;font-size:14px;margin-bottom:18px}
+.note{color:var(--faint);font-size:12.5px;margin-top:22px;line-height:1.85}
 </style>
 </head>
 <body>
