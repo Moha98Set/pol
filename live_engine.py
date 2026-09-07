@@ -561,6 +561,38 @@ class LiveEngine:
 
         return max(candidates, key=lambda c: c[2] if c[2] is not None else -9e9)
 
+    def sell_value(self, watched: WatchedEvent, side: str):
+        """
+        What one basket would fetch right now if it were sold back, or None
+        while any leg has no bid.
+
+        Buying crosses to the ask; selling crosses to the bid, and the bid
+        is always lower. That gap, multiplied by the number of legs, is
+        usually wider than the edge the basket was bought for — which is
+        why an exit is worth checking for and almost never worth taking.
+
+        A YES basket is sold into each leg's own bid. A NO basket holds the
+        opposite tokens, whose bid is what is left of a dollar after the
+        YES ask — so its proceeds fall as the YES side gets more expensive,
+        which is the mirror image and not an oversight.
+        """
+        total = 0.0
+        for _name, token_id in watched.legs:
+            book = self.books.get(token_id)
+            if book is None or book.is_stale:
+                return None
+            if side == "no":
+                levels = book.levels          # YES asks
+                if not levels:
+                    return None
+                total += 1.0 - levels[0][0]
+            else:
+                levels = book.no_levels       # YES bids, reflected
+                if not levels:
+                    return None
+                total += 1.0 - levels[0][0]
+        return total
+
     def _evaluate_event(self, watched: WatchedEvent):
         """
         Check both baskets: buy the event for less than $1, or sell it for
@@ -808,16 +840,44 @@ class LiveEngine:
             signal["legs_detail"] = self._legs_detail(watched, result)
             signal["curve"] = result["curve"]
 
-        age_ms = (now - signal["first_seen_ts"]) * 1000
-        if (self.on_signal and not signal["acted_on"]
-                and age_ms >= MIN_SIGNAL_AGE_MS):
+        if self.on_signal and not signal["acted_on"]:
             signal["acted_on"] = True
-            payload = dict(signal, age_ms=age_ms, live_result=result,
-                           legs=signal["legs_detail"])
-            try:
-                self.on_signal(payload)
-            except Exception as e:
-                log.error("on_signal callback failed: %s", e, exc_info=True)
+            self._arm_signal(watched, signal)
+
+    def _arm_signal(self, watched: WatchedEvent, signal: dict):
+        """
+        Start the age gate as a timer.
+
+        It used to be a condition tested inside this method, which meant it
+        could only be reached when a book update arrived: the signal became
+        actionable at 250ms but nothing noticed until the market next moved.
+        On a quiet market that averaged 9.7 seconds and once took 155, and
+        the delay landed in the very measurement the wallet exists to make.
+
+        A real executor acts on a clock, not on the next inbound message.
+        """
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # no loop: unit tests drive handle_message directly
+            self._fire_signal_now(watched, signal)
+            return
+        loop.create_task(self._signal_timer(watched, signal))
+
+    async def _signal_timer(self, watched: WatchedEvent, signal: dict):
+        await asyncio.sleep(MIN_SIGNAL_AGE_MS / 1000.0)
+        self._fire_signal_now(watched, signal)
+
+    def _fire_signal_now(self, watched: WatchedEvent, signal: dict):
+        # Fired even if the signal has since closed. The consumer re-prices
+        # against the live book anyway, and an edge that died inside the
+        # gate is worth recording as exactly that rather than losing.
+        age_ms = (time.time() - signal["first_seen_ts"]) * 1000
+        payload = dict(signal, age_ms=age_ms, legs=signal["legs_detail"])
+        try:
+            self.on_signal(payload)
+        except Exception as e:
+            log.error("on_signal callback failed: %s", e, exc_info=True)
 
     # -----------------------------------------------------------------
     # Paper wallet
@@ -842,7 +902,15 @@ class LiveEngine:
             return
         delay_ms = livewallet.execution_delay_ms(payload.get("num_outcomes") or 2)
         payload = dict(payload, planned_delay_ms=delay_ms)
-        asyncio.create_task(self._paper_decide(payload, watched, delay_ms))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop: a test driving handle_message directly. Decide inline
+            # rather than building a coroutine nothing will ever await —
+            # which is what this did, so the decision quietly never happened.
+            self.wallet.consider(payload, watched)
+            return
+        loop.create_task(self._paper_decide(payload, watched, delay_ms))
 
     async def _paper_decide(self, payload: dict, watched: WatchedEvent,
                             delay_ms: float):
@@ -864,6 +932,25 @@ class LiveEngine:
                 await asyncio.to_thread(self.wallet.settle_due)
             except Exception as e:
                 log.error("Paper settlement sweep failed: %s", e)
+
+    def _sell_now(self, slug: str, side: str):
+        """Price one basket of a held position against the current books."""
+        watched = self.events.get(slug)
+        if watched is None:
+            # no longer watched, so there is no book to sell into; the
+            # position simply waits for its market to resolve
+            return None
+        return self.sell_value(watched, side)
+
+    async def _exiter(self):
+        """Look for baskets the book would now buy back for enough."""
+        while True:
+            await asyncio.sleep(config.PAPER_EXIT_INTERVAL)
+            try:
+                await asyncio.to_thread(self.wallet.consider_exits,
+                                        self._sell_now)
+            except Exception as e:
+                log.error("Paper exit sweep failed: %s", e, exc_info=True)
 
     def _close_signal(self, watched: WatchedEvent, reason: str):
         signal = watched.signal
@@ -1023,6 +1110,8 @@ class LiveEngine:
             # before taking on new positions.
             await asyncio.to_thread(self.wallet.settle_due)
             tasks.append(asyncio.create_task(self._settler()))
+            if config.PAPER_EXIT_ENABLED:
+                tasks.append(asyncio.create_task(self._exiter()))
 
         try:
             while True:

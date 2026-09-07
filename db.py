@@ -619,6 +619,18 @@ MIGRATIONS = [
     ("paper_runs", "gross_profit", "REAL"),
     ("paper_runs", "gross_loss", "REAL"),
     ("paper_decisions", "fee", "REAL"),
+    # An exit sells the basket back instead of waiting for the payout, so
+    # the profit that actually landed can differ from the one booked at
+    # purchase. Kept beside it rather than overwriting it: the difference
+    # between the two is the price of leaving early, and that is the number
+    # that says whether exiting was worth it.
+    ("live_positions", "exit_proceeds", "REAL"),
+    ("live_positions", "exit_profit", "REAL"),
+    ("live_positions", "exit_sum_bids", "REAL"),
+    # Why a trade was refused as too slow, kept on the decision so the
+    # threshold can be judged from the trades it actually rejected.
+    ("live_decisions", "hold_days", "REAL"),
+    ("live_decisions", "annual_pct", "REAL"),
 ]
 
 

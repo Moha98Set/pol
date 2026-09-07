@@ -182,6 +182,8 @@
         <tr>
           <td title="{{ r.at }}">{{ r.at|ago }}</td>
           <td>{% if r.kind == 'buy' %}<span class="tag">خرید</span>
+              {% elif r.kind == 'sell' %}<span class="tag info"
+                 title="پیش از حل‌شدن بازار فروخته شد، چون دفتر دست‌کم به اندازه‌ی نگه‌داشتن پرداخت">فروش زودهنگام</span>
               {% else %}<span class="tag good">تسویه</span>{% endif %}</td>
           <td class="wrap">{{ r.event_title or r.event_slug }}</td>
           <td class="num {{ 'good' if r.amount > 0 else '' }}">{{ r.amount|money(2) }}</td>

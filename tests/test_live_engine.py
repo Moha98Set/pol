@@ -1054,3 +1054,141 @@ def test_both_limits_binding_at_once_are_both_reported(engine, monkeypatch):
     assert "27 event(s) left unwatched" in msg
     assert "20 past LIVE_TOP_N" in msg
     assert "7 over the token budget" in msg
+
+
+# =====================================================================
+# The signal age gate
+# =====================================================================
+#
+# The gate used to be a condition inside _open_or_update_signal, so it
+# could only be reached when a book update happened to arrive. A signal
+# became actionable at 250ms and then waited for the market to move — 9.7
+# seconds on average in production, once 155 — and that wait landed inside
+# the latency measurement the paper wallet exists to make.
+
+
+def test_a_signal_fires_without_waiting_for_another_book_update(engine):
+    """
+    One update opens the edge. Nothing else arrives. The signal must still
+    reach the consumer.
+    """
+    fired = []
+    engine.on_signal = fired.append
+    watched = watch(engine, n=2)
+
+    engine.handle_message({
+        "event_type": "book", "asset_id": "election-0",
+        "asks": levels((0.40, 500)), "bids": levels((0.30, 500)),
+    })
+    engine.handle_message({
+        "event_type": "book", "asset_id": "election-1",
+        "asks": levels((0.50, 500)), "bids": levels((0.20, 500)),
+    })
+
+    assert watched.signal is not None
+    assert len(fired) == 1
+
+
+def test_a_signal_fires_once_however_many_updates_follow(engine):
+    fired = []
+    engine.on_signal = fired.append
+    watch(engine, n=2)
+
+    engine.handle_message({
+        "event_type": "book", "asset_id": "election-0",
+        "asks": levels((0.40, 500)), "bids": levels((0.30, 500)),
+    })
+    for _ in range(5):
+        engine.handle_message({
+            "event_type": "book", "asset_id": "election-1",
+            "asks": levels((0.50, 500)), "bids": levels((0.20, 500)),
+        })
+
+    assert len(fired) == 1
+
+
+def test_a_consumer_that_raises_does_not_kill_the_socket_loop(engine):
+    def boom(_payload):
+        raise RuntimeError("consumer exploded")
+
+    engine.on_signal = boom
+    watch(engine, n=2)
+
+    engine.handle_message({
+        "event_type": "book", "asset_id": "election-0",
+        "asks": levels((0.40, 500)), "bids": levels((0.30, 500)),
+    })
+    engine.handle_message({          # must still be processed
+        "event_type": "book", "asset_id": "election-1",
+        "asks": levels((0.50, 500)), "bids": levels((0.20, 500)),
+    })
+
+    assert engine.books["election-1"].levels == [(0.50, 500.0)]
+
+
+# =====================================================================
+# Pricing a basket for sale
+# =====================================================================
+
+
+def test_a_yes_basket_is_sold_into_the_bids_not_the_asks(engine):
+    """
+    Selling crosses to the bid. Pricing an exit off the ask would report
+    proceeds nobody would pay and sell every basket at a loss.
+    """
+    watched = watch(engine, n=2)
+    engine.books["election-0"].apply_snapshot(levels((0.40, 100)),
+                                              levels((0.35, 100)))
+    engine.books["election-1"].apply_snapshot(levels((0.50, 100)),
+                                              levels((0.45, 100)))
+
+    assert engine.sell_value(watched, "yes") == pytest.approx(0.80)   # .35+.45
+
+
+def test_a_no_basket_is_sold_at_what_is_left_of_a_dollar_after_the_ask(engine):
+    watched = watch(engine, n=2)
+    engine.books["election-0"].apply_snapshot(levels((0.40, 100)),
+                                              levels((0.35, 100)))
+    engine.books["election-1"].apply_snapshot(levels((0.50, 100)),
+                                              levels((0.45, 100)))
+
+    # NO bid = 1 - YES ask, per leg: (1-.40) + (1-.50)
+    assert engine.sell_value(watched, "no") == pytest.approx(1.10)
+
+
+def test_a_leg_with_no_bid_makes_the_basket_unpriceable(engine):
+    """
+    A partial exit is not an exit — it leaves an unhedged remainder, which
+    is the one position this whole system exists to never hold.
+    """
+    watched = watch(engine, n=2)
+    engine.books["election-0"].apply_snapshot(levels((0.40, 100)),
+                                              levels((0.35, 100)))
+    engine.books["election-1"].apply_snapshot(levels((0.50, 100)), [])
+
+    assert engine.sell_value(watched, "yes") is None
+
+
+def test_a_stale_book_makes_the_basket_unpriceable(engine, monkeypatch):
+    watched = watch(engine, n=2)
+    for t in ("election-0", "election-1"):
+        engine.books[t].apply_snapshot(levels((0.40, 100)), levels((0.35, 100)))
+
+    monkeypatch.setattr(live_engine, "STALE_BOOK_SEC", 0)
+    engine.books["election-1"].last_update = time.time() - 1
+
+    assert engine.sell_value(watched, "yes") is None
+
+
+def test_selling_is_never_worth_more_than_buying_cost(engine):
+    """
+    The spread is the reason an exit is rare. With a real spread on every
+    leg, the sale must come out below the purchase.
+    """
+    watched = watch(engine, n=3)
+    for i in range(3):
+        engine.books[f"election-{i}"].apply_snapshot(
+            levels((0.33, 100)), levels((0.31, 100)))
+
+    buy_cost = 0.33 * 3
+    assert engine.sell_value(watched, "yes") < buy_cost

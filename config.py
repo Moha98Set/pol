@@ -324,6 +324,39 @@ PAPER_LIVE_ENABLED = _env("PAPER_LIVE_ENABLED", False, bool)
 # from staying locked forever.
 PAPER_LIVE_SETTLE_INTERVAL = _value("PAPER_LIVE_SETTLE_INTERVAL", 900, int)
 
+# Reject a basket whose profit is too small for how long it ties the money
+# up. Edge alone cannot see this: the first live run locked $250 — the
+# whole per-trade cap — into a market seven days out for $0.94, which is
+# 17% a year, while a $47 position returning 207% a year went begging.
+# Expressed as a percent per year so trades of different lengths compare.
+# Set to 0 to disable the test entirely.
+PAPER_MIN_ANNUAL_PCT = _value("PAPER_MIN_ANNUAL_PCT", 20.0)
+
+# Selling the basket back before the market resolves.
+#
+# Holding to resolution is the risk-free path: we own every outcome, so
+# the payout is certain and the profit was fixed at purchase. Selling
+# means crossing the spread on every leg, which usually costs more than
+# the edge was worth — so this is not an escape hatch, and it must never
+# fire out of impatience.
+#
+# It exists for the other problem the first live run exposed: capital sat
+# locked for 13 to 57 days, and the wallet ran out of money long before it
+# ran out of opportunities. An exit only fires when the book is offering
+# at least as much as holding would pay, which makes it free money and a
+# faster turn of the same dollar.
+PAPER_EXIT_ENABLED = _env("PAPER_EXIT_ENABLED", True, bool)
+
+# The share of the locked-in profit an exit must still deliver, after the
+# estimated exit fee. 1.0 means "never sell for less than holding pays",
+# which is the only setting that cannot cost anything. Below 1.0 trades
+# profit for liquidity and should be chosen deliberately.
+PAPER_EXIT_MIN_FRACTION = _value("PAPER_EXIT_MIN_FRACTION", 1.0)
+
+# How often to price open baskets against the book to see whether one of
+# those exits is available.
+PAPER_EXIT_INTERVAL = _value("PAPER_EXIT_INTERVAL", 60, int)
+
 
 # =====================================================================
 # Alerts

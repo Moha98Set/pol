@@ -360,3 +360,193 @@ def test_two_decisions_landing_together_cannot_overdraw_the_wallet(database):
     spent = sum(r["capital"] + r["fee"] for r in results if r.get("taken"))
     assert spent <= 300.0 + 1e-9
     assert w.equity == pytest.approx(300.0)
+
+
+# =====================================================================
+# Return per day held
+# =====================================================================
+#
+# Edge alone cannot tell a good trade from a bad one, because it says
+# nothing about how long the money is gone. The first live run locked the
+# entire per-trade cap into a 17%-a-year market while a 207%-a-year one
+# took what was left.
+
+
+def days_from_now(days):
+    from datetime import datetime, timedelta, timezone
+    return (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+
+
+def test_a_trade_that_ties_money_up_too_long_for_its_profit_is_refused(database):
+    w = wallet(database, min_annual_pct=20.0, min_capital=1)
+    # 1% edge over a year is 1% a year
+    ev = FakeEvent(end_date=days_from_now(365))
+
+    row = w.consider(signal(), ev)
+
+    assert row["taken"] == 0
+    assert row["reason"] == livewallet.SKIP_SLOW
+
+
+def test_the_same_profit_over_a_short_hold_is_accepted(database):
+    w = wallet(database, min_annual_pct=20.0, min_capital=1)
+    ev = FakeEvent(end_date=days_from_now(5))
+
+    row = w.consider(signal(), ev)
+
+    assert row["taken"] == 1
+
+
+def test_the_rejected_rate_is_recorded_so_the_threshold_can_be_judged(database):
+    """A refusal that does not say how close it came cannot be tuned."""
+    w = wallet(database, min_annual_pct=20.0, min_capital=1)
+    w.consider(signal(), FakeEvent(end_date=days_from_now(365)))
+
+    row = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert row["annual_pct"] == pytest.approx(1.0, abs=0.2)
+    assert row["hold_days"] == pytest.approx(365, abs=1)
+
+
+def test_an_event_with_no_end_date_is_not_refused_for_it(database):
+    """
+    Refusing on missing data would silently drop whole categories of
+    market rather than the slow trades the test is for.
+    """
+    w = wallet(database, min_annual_pct=1000.0, min_capital=1)
+
+    row = w.consider(signal(), FakeEvent(end_date=None))
+
+    assert row["taken"] == 1
+
+
+def test_the_test_can_be_switched_off(database):
+    w = wallet(database, min_annual_pct=0, min_capital=1)
+    row = w.consider(signal(), FakeEvent(end_date=days_from_now(3650)))
+    assert row["taken"] == 1
+
+
+def test_a_market_resolving_within_a_day_cannot_claim_an_absurd_rate(database):
+    """
+    Dividing by hours would turn any profit into thousands of percent a
+    year and wave through everything.
+    """
+    assert livewallet.days_until(days_from_now(0.01)) == 1.0
+
+
+# =====================================================================
+# Selling back early
+# =====================================================================
+
+
+def buy_one(database, *, edge=0.010, sum_asks=0.990, fillable=100.0, **kw):
+    w = wallet(database, priced=book(edge=edge, sum_asks=sum_asks,
+                                     fillable=fillable),
+               min_capital=1, min_annual_pct=0, **kw)
+    row = w.consider(signal(edge=edge, sum_asks=sum_asks), FakeEvent())
+    assert row["taken"] == 1
+    return w, row
+
+
+def test_an_exit_below_what_holding_pays_is_refused(database):
+    """The default bar is the whole locked-in profit, so this is a no-op."""
+    w, row = buy_one(database)
+    cash_before = w.cash
+
+    sold = w.consider_exits(lambda slug, side: 0.99)
+
+    assert sold == 0
+    assert w.cash == cash_before
+    assert len(w.open_positions()) == 1
+
+
+def test_an_exit_that_beats_holding_is_taken(database):
+    w, row = buy_one(database)
+    # bids far above the 0.99 paid, so the proceeds clear cost plus profit
+    sold = w.consider_exits(lambda slug, side: 1.20)
+
+    assert sold == 1
+    assert w.open_positions() == []
+    assert w.locked == pytest.approx(0.0, abs=1e-9)
+
+
+def test_selling_frees_the_capital_for_another_trade(database):
+    """The whole reason the exit exists: the money comes back early."""
+    w, row = buy_one(database)
+    locked_before = w.locked
+    assert locked_before > 0
+
+    w.consider_exits(lambda slug, side: 1.20)
+
+    assert w.locked == pytest.approx(0.0, abs=1e-9)
+    assert w.cash > w.state["start_cash"]
+
+
+def test_the_profit_booked_at_purchase_is_replaced_not_added_to(database):
+    """
+    The profit was recorded as certain when the basket was bought. An exit
+    that pays more must not leave both numbers in the total.
+    """
+    w, row = buy_one(database)
+    booked = row["profit"]
+
+    w.consider_exits(lambda slug, side: 1.20)
+
+    p = database.execute("SELECT * FROM live_positions").fetchone()
+    assert p["settle_reason"] == "sold"
+    assert w.state["realised_profit"] == pytest.approx(p["exit_profit"])
+    assert w.state["realised_profit"] != pytest.approx(booked + p["exit_profit"])
+
+
+def test_equity_after_an_exit_equals_cash_because_nothing_is_held(database):
+    w, _row = buy_one(database)
+    w.consider_exits(lambda slug, side: 1.20)
+    assert w.equity == pytest.approx(w.cash)
+
+
+def test_an_unpriceable_basket_is_left_alone(database):
+    w, _row = buy_one(database)
+    assert w.consider_exits(lambda slug, side: None) == 0
+    assert len(w.open_positions()) == 1
+
+
+def test_a_pricing_error_does_not_lose_the_position(database):
+    def boom(slug, side):
+        raise RuntimeError("book vanished")
+
+    w, _row = buy_one(database)
+    assert w.consider_exits(boom) == 0
+    assert len(w.open_positions()) == 1
+
+
+def test_the_exit_is_written_to_the_ledger(database):
+    w, _row = buy_one(database)
+    w.consider_exits(lambda slug, side: 1.20)
+
+    kinds = [r["kind"] for r in database.execute(
+        "SELECT kind FROM live_ledger ORDER BY id")]
+    assert kinds == ["buy", "sell"]
+
+
+def test_a_sold_position_does_not_settle_again(database):
+    """Settling it twice would credit the wallet the capital twice."""
+    w, _row = buy_one(database)
+    w.consider_exits(lambda slug, side: 1.20)
+    cash = w.cash
+
+    assert w.settle_due() == 0
+    assert w.settle_event("ev") == 0
+    assert w.cash == pytest.approx(cash)
+
+
+def test_a_lower_fraction_accepts_less_profit_for_the_liquidity(database):
+    w, row = buy_one(database, exit_min_fraction=0.0)
+    # bids that cover the cost exactly and nothing more
+    cost_per_share = (row["capital"] + row["fee"]) / row["shares"]
+    # plus the exit fee, which the proceeds must also carry
+    per_share = cost_per_share + row["fee"] / row["shares"]
+
+    sold = w.consider_exits(lambda slug, side: per_share)
+
+    assert sold == 1
+    p = database.execute("SELECT * FROM live_positions").fetchone()
+    assert p["exit_profit"] == pytest.approx(0.0, abs=1e-6)
