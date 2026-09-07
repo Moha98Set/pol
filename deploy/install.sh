@@ -71,33 +71,26 @@ else
     # feature's keys, and the unit that reads them fails at start rather
     # than falling back. Append only what is absent; never touch a key
     # that already has a value.
+    # Read the keys out of polly.env.example rather than listing them
+    # here. The list used to be maintained by hand and fell behind every
+    # time a setting was added: the four PAPER_EXIT/PAPER_MIN_ANNUAL keys
+    # shipped, install.sh said nothing, and they were simply absent from
+    # the deployed env file. Defaults kept the service running, which is
+    # what made it quiet — an operator could not tune what was not there.
     added=()
-    for key in VERDICT_RETENTION_SCANS POLLY_DASH_HOST POLLY_DASH_PORT \
-               POLLY_DASH_USER POLLY_DASH_PASSWORD_HASH POLLY_DASH_SECRET_KEY \
-               LIVE_RECORD LIVE_RECORD_MIN_EDGE LIVE_TICK_MIN_INTERVAL_MS \
-               TICK_RETENTION_DAYS PAPER_LIVE_ENABLED; do
+    lines=()
+    while IFS= read -r line; do
+        key="${line%%=*}"
         if ! grep -qE "^${key}=" "$CONF_DIR/polly.env"; then
             added+=("$key")
+            lines+=("$line")
         fi
-    done
+    done < <(grep -E '^[A-Z][A-Z0-9_]*=' "$APP_DIR/deploy/polly.env.example")
     if (( ${#added[@]} )); then
         {
             echo ""
             echo "# --- added by install.sh on $(date +%F) ---"
-            for key in "${added[@]}"; do
-                case "$key" in
-                    VERDICT_RETENTION_SCANS) echo "VERDICT_RETENTION_SCANS=96" ;;
-                    POLLY_DASH_HOST)         echo "POLLY_DASH_HOST=0.0.0.0" ;;
-                    POLLY_DASH_PORT)         echo "POLLY_DASH_PORT=8971" ;;
-                    POLLY_DASH_USER)         echo "POLLY_DASH_USER=analyst" ;;
-                    LIVE_RECORD)             echo "LIVE_RECORD=1" ;;
-                    LIVE_RECORD_MIN_EDGE)    echo "LIVE_RECORD_MIN_EDGE=-0.02" ;;
-                    LIVE_TICK_MIN_INTERVAL_MS) echo "LIVE_TICK_MIN_INTERVAL_MS=1000" ;;
-                    TICK_RETENTION_DAYS)     echo "TICK_RETENTION_DAYS=7" ;;
-                    PAPER_LIVE_ENABLED)      echo "PAPER_LIVE_ENABLED=0" ;;
-                    *)                       echo "${key}=" ;;
-                esac
-            done
+            printf '%s\n' "${lines[@]}"
         } >> "$CONF_DIR/polly.env"
         echo "    added ${#added[@]} new setting(s): ${added[*]}"
     fi
