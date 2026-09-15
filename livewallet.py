@@ -253,9 +253,9 @@ class LiveWallet:
                 signal_age_ms, planned_delay_ms, total_ms, signal_edge,
                 entry_edge, signal_sum_asks, entry_sum_asks,
                 fillable_capital, shares, capital, fee, profit,
-                hold_days, annual_pct)
+                hold_days, annual_pct, signal_leg_skew_ms, entry_leg_skew_ms)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?)
         """, (row.get("at") or utcnow(), row.get("event_slug"),
               row.get("event_title"), row.get("side"),
               row.get("num_outcomes"), row.get("payout"), row.get("fee_rate"),
@@ -266,7 +266,8 @@ class LiveWallet:
               row.get("entry_sum_asks"), row.get("fillable_capital"),
               row.get("shares"), row.get("capital"), row.get("fee"),
               row.get("profit"), row.get("hold_days"),
-              row.get("annual_pct")))
+              row.get("annual_pct"), row.get("signal_leg_skew_ms"),
+              row.get("entry_leg_skew_ms")))
         self.db.commit()
         return cur.lastrowid
 
@@ -325,7 +326,14 @@ class LiveWallet:
             "planned_delay_ms": signal.get("planned_delay_ms"),
             "signal_edge": signal.get("best_net_edge"),
             "signal_sum_asks": signal.get("best_sum_asks"),
+            "signal_leg_skew_ms": signal.get("leg_skew_ms"),
         }
+        skew_now = getattr(self, "skew_now", None)
+        if skew_now is not None:
+            try:
+                row["entry_leg_skew_ms"] = skew_now(watched)
+            except Exception:
+                row["entry_leg_skew_ms"] = None
         opened_ts = signal.get("first_seen_ts")
         row["total_ms"] = ((time.time() - opened_ts) * 1000
                            if opened_ts else None)

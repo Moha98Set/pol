@@ -77,6 +77,7 @@
     <select id="show" name="show" onchange="this.form.submit()">
       <option value="positive" {{ 'selected' if show == 'positive' }}>فقط لبه‌ی مثبت — قابل خرید ({{ '{:,}'.format(summary.positive or 0) }})</option>
       <option value="crossed"  {{ 'selected' if show == 'crossed'  }}>فقط آن‌هایی که سیگنال شدند ({{ '{:,}'.format(summary.crossed or 0) }})</option>
+      <option value="flicker"  {{ 'selected' if show == 'flicker'  }}>فقط پرش‌های تک‌لحظه‌ای — غیرواقعی ({{ '{:,}'.format(summary.flicker or 0) }})</option>
       <option value="all"      {{ 'selected' if show == 'all'      }}>همه‌ی پنجره‌ها، شامل نزدیک‌شده‌ها ({{ '{:,}'.format(summary.n or 0) }})</option>
     </select>
   </div>

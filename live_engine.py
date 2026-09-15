@@ -337,6 +337,7 @@ class LiveEngine:
             # statements behind a lock.
             self.wallet = livewallet.LiveWallet(
                 dblib.connect(check_same_thread=False), self.price)
+            self.wallet.skew_now = self.leg_skew_ms
             if self.on_signal is not None:
                 log.warning("Paper wallet is on; replacing the on_signal "
                             "callback with it.")
@@ -521,11 +522,58 @@ class LiveEngine:
     # Evaluation + signal lifecycle
     # -----------------------------------------------------------------
 
+    def handle_frame(self, msgs: list):
+        """
+        Apply every message in one socket frame, then evaluate each touched
+        event once.
+
+        Evaluating after each message priced a basket half-way through an
+        update: one leg already moved, its partner still on the old price.
+        On binary markets, where the two legs move as mirror images, that
+        half-applied state reads as an edge — +1.75% on a match that was
+        really at -3.31%, lasting a single evaluation. Nothing real exists
+        between two messages of the same frame, so nothing is priced there.
+        """
+        self._deferred = set()
+        try:
+            for msg in msgs:
+                if isinstance(msg, dict):
+                    self.handle_message(msg)
+        finally:
+            touched, self._deferred = self._deferred, None
+        seen = set()
+        for token_id in touched:
+            for slug in self.token_to_events.get(token_id, []):
+                if slug in seen:
+                    continue
+                seen.add(slug)
+                watched = self.events.get(slug)
+                if watched is not None:
+                    self._evaluate_event(watched)
+
     def _reevaluate(self, token_id: str):
+        if getattr(self, "_deferred", None) is not None:
+            self._deferred.add(token_id)
+            return
         for slug in self.token_to_events.get(token_id, []):
             watched = self.events.get(slug)
             if watched is not None:
                 self._evaluate_event(watched)
+
+    def leg_skew_ms(self, watched: WatchedEvent) -> Optional[float]:
+        """
+        How far apart in time the legs' books were last updated.
+
+        Recorded, not enforced. A leg that has not updated is usually just
+        quiet and still correct, so refusing on age would silence calm
+        markets; this exists so the data can say whether large skews go
+        with edges that vanish, before anything is refused on it.
+        """
+        stamps = [self.books[t].last_update for _n, t in watched.legs
+                  if t in self.books and self.books[t].last_update]
+        if len(stamps) < 2:
+            return None
+        return (max(stamps) - min(stamps)) * 1000.0
 
     def price(self, watched: WatchedEvent):
         """
@@ -811,6 +859,7 @@ class LiveEngine:
                 "curve": result["curve"],
                 "url": watched.url,
                 "acted_on": False,
+                "leg_skew_ms": self.leg_skew_ms(watched),
             }
             self.stats["signals"] += 1
             log.info("EDGE OPEN  | %-3s | %s | net=%.3f%%/$ sum=%.4f "
@@ -1042,9 +1091,8 @@ class LiveEngine:
                         data = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    for msg in (data if isinstance(data, list) else [data]):
-                        if isinstance(msg, dict):
-                            self.handle_message(msg)
+                    self.handle_frame(data if isinstance(data, list)
+                                      else [data])
             finally:
                 ping_task.cancel()
 

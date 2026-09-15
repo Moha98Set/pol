@@ -145,3 +145,30 @@ def test_sorting_keeps_the_slice(client):
     """Clicking a column header must not quietly reveal the hidden rows."""
     html = body(client, "?sort=best_edge&dir=asc")
     assert "never-worth-buying" not in html
+
+
+# =====================================================================
+# Flicker windows
+# =====================================================================
+
+
+def _add_flicker():
+    conn = dblib.connect(dashboard.DB_PATH)
+    add(conn, edge=+0.0175, crossed=1, slug="one-tick-phantom")
+    conn.execute("UPDATE edge_windows SET ticks = 1, duration_ms = 0 "
+                 "WHERE event_slug = 'one-tick-phantom'")
+    conn.commit()
+    conn.close()
+
+
+def test_a_one_tick_window_is_not_shown_as_a_tradable_edge(client):
+    _add_flicker()
+    assert "one-tick-phantom" not in body(client)
+    assert "one-tick-phantom" not in body(client, "?show=crossed")
+
+
+def test_flicker_windows_are_one_click_away_and_counted(client):
+    _add_flicker()
+    html = body(client, "?show=flicker")
+    assert "one-tick-phantom" in html
+    assert "profitable-and-signalled" not in html

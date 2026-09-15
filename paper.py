@@ -64,6 +64,7 @@ def utcnow() -> str:
 # Why a window was refused. Named rather than numbered so a run's summary
 # reads as sentences.
 SKIP_SHORT = "window_too_short"
+SKIP_FLICKER = "flicker"
 SKIP_EDGE = "edge_too_thin"
 SKIP_LEGS = "too_many_legs"
 SKIP_NO_TICKS = "no_tick_after_latency"
@@ -74,6 +75,7 @@ SKIP_BROKE = "not_enough_cash"
 
 SKIP_LABELS = {
     SKIP_SHORT: "پنجره کوتاه‌تر از حداقل",
+    SKIP_FLICKER: "پرش تک‌لحظه‌ای — احتمالاً قیمت‌گذاری نیمه‌کاره",
     SKIP_EDGE: "لبه کمتر از آستانه",
     SKIP_LEGS: "پاهای بیش از حد",
     SKIP_NO_TICKS: "تیکی بعد از تأخیر اجرا نبود",
@@ -267,6 +269,14 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
         }
 
         legs = w["num_outcomes"] or 2
+
+        # Not a filter: data validity, so it applies to the control run as
+        # well. One tick inside a second is a basket priced mid-update, and
+        # letting the control "trade" it would flatter the no-filter side.
+        if (w["ticks"] or 0) <= 1 and (w["duration_ms"] or 0) < 1000:
+            row["reason"] = SKIP_FLICKER
+            decisions.append(row)
+            continue
 
         if not take_everything:
             if (w["duration_ms"] or 0) < min_window_ms:

@@ -45,6 +45,7 @@ from flask import (Flask, abort, flash, g, redirect, render_template,
 
 import config
 import dashauth
+import db as dblib
 import glossary
 
 # =====================================================================
@@ -459,8 +460,9 @@ app.jinja_env.globals.update(sort_url=sort_url)
 # would have profited. The rest are kept and one click away — recording a
 # wide band is deliberate — but they are not the default view.
 WINDOW_SHOW = {
-    "positive": "best_edge > 0",
-    "crossed": "crossed = 1",
+    "positive": f"best_edge > 0 AND NOT {dblib.FLICKER_SQL}",
+    "crossed": f"crossed = 1 AND NOT {dblib.FLICKER_SQL}",
+    "flicker": dblib.FLICKER_SQL,
     "all": None,
 }
 
@@ -911,10 +913,11 @@ def windows():
         ORDER BY {order_by} LIMIT ? OFFSET ?
     """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
 
-    summary = one("""
+    summary = one(f"""
         SELECT COUNT(*) n,
-               SUM(crossed) crossed,
-               SUM(best_edge > 0) positive,
+               SUM(crossed AND NOT {dblib.FLICKER_SQL}) crossed,
+               SUM(best_edge > 0 AND NOT {dblib.FLICKER_SQL}) positive,
+               SUM({dblib.FLICKER_SQL}) flicker,
                AVG(duration_ms) avg_ms,
                MAX(duration_ms) max_ms,
                MAX(best_edge) best,

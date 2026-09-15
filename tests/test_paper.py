@@ -701,3 +701,17 @@ def test_deploying_more_capital_is_not_the_same_as_choosing_better(database):
     assert control["realised"] > filtered["realised"]
     # ...only because it spent more; per dollar the filters chose better
     assert (filtered["realised"] / used_f) > (control["realised"] / used_c)
+
+
+def test_a_flicker_window_is_refused_even_by_the_control_run(database):
+    """Data validity, not a filter: taking everything must not take this."""
+    wid = add_window(database, seconds=1, edge=0.02)
+    database.execute("UPDATE edge_windows SET duration_ms = 0 WHERE id = ?",
+                     (wid,))
+    database.commit()
+
+    paper.replay(database, take_everything=True)
+
+    row = database.execute("SELECT * FROM paper_decisions").fetchone()
+    assert row["taken"] == 0
+    assert row["reason"] == paper.SKIP_FLICKER

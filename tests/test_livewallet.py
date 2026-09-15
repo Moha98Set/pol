@@ -550,3 +550,15 @@ def test_a_lower_fraction_accepts_less_profit_for_the_liquidity(database):
     assert sold == 1
     p = database.execute("SELECT * FROM live_positions").fetchone()
     assert p["exit_profit"] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_leg_skew_is_recorded_at_signal_and_at_entry(database):
+    w = wallet(database, min_capital=1, min_annual_pct=0)
+    w.skew_now = lambda ev: 1234.0
+    sig = dict(signal(), leg_skew_ms=55.0)
+
+    w.consider(sig, FakeEvent())
+
+    row = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert row["signal_leg_skew_ms"] == pytest.approx(55.0)
+    assert row["entry_leg_skew_ms"] == pytest.approx(1234.0)

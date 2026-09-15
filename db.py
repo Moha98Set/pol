@@ -631,7 +631,18 @@ MIGRATIONS = [
     # threshold can be judged from the trades it actually rejected.
     ("live_decisions", "hold_days", "REAL"),
     ("live_decisions", "annual_pct", "REAL"),
+    # How far apart the legs' books were last updated, at the signal and
+    # at entry. Measured before anything is refused on it.
+    ("live_decisions", "signal_leg_skew_ms", "REAL"),
+    ("live_decisions", "entry_leg_skew_ms", "REAL"),
 ]
+
+
+# A window too short to be a market event: crossed the threshold, then
+# gone within a second and a single tick. Almost always a basket priced
+# mid-update. A SQL expression rather than a column so every window
+# already recorded is classified too, without a backfill.
+FLICKER_SQL = "(COALESCE(ticks, 0) <= 1 AND COALESCE(duration_ms, 0) < 1000)"
 
 
 def _migrate(db: sqlite3.Connection):

@@ -1192,3 +1192,65 @@ def test_selling_is_never_worth_more_than_buying_cost(engine):
 
     buy_cost = 0.33 * 3
     assert engine.sell_value(watched, "yes") < buy_cost
+
+
+# =====================================================================
+# One evaluation per socket frame
+# =====================================================================
+#
+# Evaluating after every message priced baskets half-way through an
+# update. In production that produced single-tick "edges" of +1.75% on a
+# match whose real basket sat at -3.31%.
+
+
+def _race_setup(engine):
+    fired = []
+    engine.on_signal = fired.append
+    watch(engine, n=2)
+    for leg in ("election-0", "election-1"):
+        engine.handle_message({"event_type": "book", "asset_id": leg,
+                               "asks": levels((0.52, 500)),
+                               "bids": levels((0.40, 500))})
+    assert fired == []                     # 1.04: no edge to begin with
+    move = [
+        {"event_type": "price_change", "asset_id": "election-0", "changes": [
+            {"side": "SELL", "price": "0.52", "size": "0"},
+            {"side": "SELL", "price": "0.45", "size": "500"}]},
+        {"event_type": "price_change", "asset_id": "election-1", "changes": [
+            {"side": "SELL", "price": "0.52", "size": "0"},
+            {"side": "SELL", "price": "0.59", "size": "500"}]},
+    ]
+    return fired, move
+
+
+def test_the_half_applied_frame_really_did_look_like_an_edge(engine):
+    """The control: message-by-message evaluation sees the phantom."""
+    fired, move = _race_setup(engine)
+    for msg in move:
+        engine.handle_message(msg)
+    assert len(fired) == 1
+
+
+def test_a_frame_is_priced_only_once_it_is_fully_applied(engine):
+    fired, move = _race_setup(engine)
+    engine.handle_frame(move)
+    assert fired == []
+
+
+def test_a_real_edge_inside_a_frame_still_fires(engine):
+    fired, _move = _race_setup(engine)
+    engine.handle_frame([
+        {"event_type": "price_change", "asset_id": "election-0", "changes": [
+            {"side": "SELL", "price": "0.52", "size": "0"},
+            {"side": "SELL", "price": "0.45", "size": "500"}]},
+    ])
+    assert len(fired) == 1
+
+
+def test_leg_skew_is_the_spread_of_update_times(engine):
+    watched = watch(engine, n=2)
+    engine.books["election-0"].apply_snapshot(levels((0.5, 1)))
+    engine.books["election-1"].apply_snapshot(levels((0.5, 1)))
+    engine.books["election-0"].last_update = 1000.0
+    engine.books["election-1"].last_update = 1002.5
+    assert engine.leg_skew_ms(watched) == pytest.approx(2500.0)
