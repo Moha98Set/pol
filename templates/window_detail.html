@@ -6,7 +6,6 @@
 <p class="sub">
   پنجره #{{ win.id }} — باز شد {{ win.opened_at|ago }}
   {% if win.url %}· <a href="{{ win.url }}" target="_blank" rel="noopener">مشاهده در پالی‌مارکت</a>{% endif %}
-  · <a href="{{ url_for('market_detail', slug=win.event_slug) }}">تاریخچه‌ی این بازار</a>
 </p>
 
 <div class="cards">

@@ -9,12 +9,12 @@ particular market was the right call. So every raw code is translated
 through glossary.py, and every table is built to be scanned by eye rather
 than grepped.
 
-The data comes from three places, in decreasing order of permanence:
+The data comes from:
 
-    opportunities / near_misses   the long record; kept forever
-    event_verdicts                one row per event per scan, pruned to a
-                                  window (see VERDICT_RETENTION_SCANS)
-    rejections / scan_timings     aggregate counters, kept forever
+    opportunities / near_misses   what the REST scanner found
+    edge_windows / edge_ticks     what the live engine watched happen
+    live_* / paper_*              the two wallets
+    rejections / scan_timings     aggregate counters behind the overview
 
 Read-only by design: this process opens the same SQLite file the monitor
 writes and never issues anything but SELECT. WAL mode is what makes that
@@ -689,183 +689,9 @@ def opportunity_detail(opp_id):
 # =====================================================================
 
 
-MISS_COLS = {
-    "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
-    "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
-    "gross_edge":    Col("gross_edge", "لبه‌ی ناخالص", "percent", 0.01, "0.001"),
-    "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
-    "fee_rate":      Col("fee_rate", "کارمزد", "percent", 0.01, "0.1"),
-    "volume_24h":    Col("volume_24h", "حجم ۲۴س", "money", step="100"),
-}
-
-
-@app.route("/near-misses")
-@login_required
-def near_misses():
-    page = max(1, request.args.get("page", 1, type=int))
-
-    # 24h by default. The page used to be pinned to "today", and dropping
-    # to no window at all would quietly turn a short table into the whole
-    # history the first time someone opened it.
-    order_by, clauses, params, sortstate = sort_and_filter(
-        MISS_COLS, "net_edge", time_col="found_at", default_since="24h")
-    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    total = one(f"SELECT COUNT(*) c FROM near_misses{where}", params)["c"]
-    items = rows(f"""
-        SELECT * FROM near_misses{where}
-        ORDER BY {order_by} LIMIT ? OFFSET ?
-    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
-
-    return render_template("near_misses.html", items=items, total=total,
-                           page=page, pages=_pages(total),
-                           sortstate=sortstate)
-
-
 # =====================================================================
 # Markets — every event the scan read
 # =====================================================================
-
-
-def _verdict_filters():
-    """Shared WHERE clause for the market tables, from the query string."""
-    clauses, params = [], []
-
-    scan = request.args.get("scan", type=int)
-    if scan:
-        clauses.append("scan_id = ?")
-        params.append(scan)
-    else:
-        clauses.append("scan_id = (SELECT MAX(scan_id) FROM event_verdicts)")
-
-    code = request.args.get("code", "")
-    if code:
-        clauses.append("code = ?")
-        params.append(code)
-
-    outcome = request.args.get("outcome", "")
-    if outcome:
-        clauses.append("outcome = ?")
-        params.append(outcome)
-
-    q = request.args.get("q", "").strip()
-    if q:
-        clauses.append("event_title LIKE ?")
-        params.append(f"%{q}%")
-
-    # Flagged-but-not-rejected markets had no way to be found: they carry
-    # no rejection code, so filtering by reason never surfaced them, and
-    # they look identical to clean ones in the table.
-    suspicion = request.args.get("suspicion", "")
-    if suspicion == "any":
-        clauses.append("suspicions != '[]' AND suspicions IS NOT NULL")
-    elif suspicion:
-        clauses.append("suspicions LIKE ?")
-        params.append(f'%"{suspicion}"%')
-
-    return " WHERE " + " AND ".join(clauses), params
-
-
-VERDICT_COLS = {
-    "num_outcomes":  Col("num_outcomes", "گزینه", step="1"),
-    "sum_best_asks": Col("sum_best_asks", "مجموع قیمت", step="0.0001"),
-    "net_edge":      Col("net_edge", "لبه‌ی خالص", "percent", 0.01, "0.001"),
-    "fee_rate":      Col("fee_rate", "کارمزد", "percent", 0.01, "0.1"),
-    "volume_24h":    Col("volume_24h", "حجم ۲۴س", "money", step="100"),
-}
-
-
-@app.route("/markets")
-@login_required
-def markets():
-    if not table_exists("event_verdicts"):
-        return render_template("no_verdicts.html")
-
-    page = max(1, request.args.get("page", 1, type=int))
-    where, params = _verdict_filters()
-    order_by, extra, extra_params, sortstate = sort_and_filter(
-        VERDICT_COLS, "net_edge", time_col="recorded_at")
-    if extra:
-        where += " AND " + " AND ".join(extra)
-        params = [*params, *extra_params]
-
-    total = one(f"SELECT COUNT(*) c FROM event_verdicts {where}", params)["c"]
-    items = rows(f"""
-        SELECT * FROM event_verdicts {where}
-        ORDER BY {order_by} LIMIT ? OFFSET ?
-    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
-
-    return render_template(
-        "markets.html", items=items, total=total, page=page,
-        pages=_pages(total), title="بازارهای بررسی‌شده",
-        suspicions=glossary.SUSPICIONS, sortstate=sortstate,
-        codes=_codes_in_scope(), scans=_recent_scan_ids(),
-        show_outcome_filter=True)
-
-
-@app.route("/rejected")
-@login_required
-def rejected():
-    if not table_exists("event_verdicts"):
-        return render_template("no_verdicts.html")
-
-    page = max(1, request.args.get("page", 1, type=int))
-    where, params = _verdict_filters()
-    where += " AND outcome = 'rejected'"
-    order_by, extra, extra_params, sortstate = sort_and_filter(
-        VERDICT_COLS, "volume_24h", time_col="recorded_at")
-    if extra:
-        where += " AND " + " AND ".join(extra)
-        params = [*params, *extra_params]
-
-    total = one(f"SELECT COUNT(*) c FROM event_verdicts {where}", params)["c"]
-    items = rows(f"""
-        SELECT * FROM event_verdicts {where}
-        ORDER BY {order_by} LIMIT ? OFFSET ?
-    """, (*params, PAGE_SIZE, (page - 1) * PAGE_SIZE))
-
-    # Reason breakdown for the scan in view, so the table has a summary
-    # above it rather than only rows.
-    breakdown = rows(f"""
-        SELECT code, COUNT(*) n FROM event_verdicts {where}
-        GROUP BY code ORDER BY n DESC
-    """, params)
-
-    return render_template(
-        "markets.html", items=items, total=total, page=page,
-        pages=_pages(total), title="بازارهای رد شده",
-        suspicions=glossary.SUSPICIONS, sortstate=sortstate,
-        codes=_codes_in_scope(rejected_only=True), scans=_recent_scan_ids(),
-        breakdown=breakdown, show_outcome_filter=False)
-
-
-@app.route("/market/<path:slug>")
-@login_required
-def market_detail(slug):
-    history = rows("""
-        SELECT * FROM event_verdicts WHERE event_slug = ?
-        ORDER BY scan_id DESC LIMIT 200
-    """, (slug,)) if table_exists("event_verdicts") else []
-
-    if not history:
-        abort(404)
-
-    latest = history[0]
-    misses = rows("""
-        SELECT * FROM near_misses WHERE event_slug = ?
-        ORDER BY found_at DESC LIMIT 20
-    """, (slug,))
-    opps = rows("""
-        SELECT * FROM opportunities WHERE event_slug = ?
-        ORDER BY found_at DESC LIMIT 20
-    """, (slug,))
-
-    trend = [r for r in reversed(history) if r["sum_best_asks"] is not None]
-
-    return render_template(
-        "market_detail.html", slug=slug, latest=latest, history=history,
-        misses=misses, opps=opps, trend=trend,
-        suspicions=json.loads(latest["suspicions"] or "[]"))
 
 
 # =====================================================================
@@ -974,66 +800,6 @@ def window_detail(window_id):
 
     return render_template("window_detail.html", win=win, ticks=ticks,
                            others=others)
-
-
-# =====================================================================
-# Edge distribution — where the threshold actually sits
-# =====================================================================
-
-
-# Candidate thresholds, coarsest first. Shown against the real
-# distribution so "we found nothing" becomes a statement about where the
-# line is drawn rather than about whether the pipeline works.
-THRESHOLDS = [0.010, 0.005, 0.003, 0.002, 0.001, 0.0005, 0.0]
-
-
-@app.route("/distribution")
-@login_required
-def distribution():
-    if not table_exists("event_verdicts"):
-        return render_template("no_verdicts.html")
-
-    scans = request.args.get("scans", 20, type=int)
-    scope = ("scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)",
-             [scans])
-
-    edges = [r["net_edge"] for r in rows(
-        f"SELECT net_edge FROM event_verdicts "
-        f"WHERE net_edge IS NOT NULL AND {scope[0]} ORDER BY net_edge",
-        scope[1])]
-
-    sensitivity = [
-        {"threshold": t, "n": sum(1 for e in edges if e >= t)}
-        for t in THRESHOLDS
-    ]
-
-    # 30 equal buckets over the observed range; the interesting mass is
-    # always near zero, so the axis is left as-is rather than log-scaled.
-    hist = []
-    if edges:
-        lo, hi = edges[0], edges[-1]
-        span = (hi - lo) or 1e-9
-        nbuckets = 30
-        counts = [0] * nbuckets
-        for e in edges:
-            idx = min(int((e - lo) / span * nbuckets), nbuckets - 1)
-            counts[idx] += 1
-        hist = [{"lo": lo + i * span / nbuckets,
-                 "hi": lo + (i + 1) * span / nbuckets,
-                 "n": c} for i, c in enumerate(counts)]
-
-    windows_best = None
-    if table_exists("edge_windows"):
-        windows_best = one("SELECT MAX(best_edge) b FROM edge_windows")["b"]
-
-    return render_template(
-        "distribution.html", edges=edges, hist=hist,
-        sensitivity=sensitivity, scans=scans,
-        current=config.MIN_NET_EDGE,
-        near_miss_floor=config.NEAR_MISS_MIN_NET,
-        windows_best=windows_best,
-        best=edges[-1] if edges else None,
-        median=edges[len(edges) // 2] if edges else None)
 
 
 # =====================================================================
@@ -1226,86 +992,6 @@ def live_wallet():
 # =====================================================================
 
 
-@app.route("/funnel")
-@login_required
-def funnel():
-    scans = request.args.get("scans", 20, type=int)
-    scope = ("scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)",
-             (scans,))
-
-    fetched = one(f"""
-        SELECT COALESCE(SUM(events_total), 0) n FROM scans
-        WHERE id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
-    """, (scans,))["n"]
-
-    stages = defaultdict(list)
-    for r in rows(f"""
-        SELECT stage, code, SUM(count) n FROM rejections
-        WHERE {scope[0]} AND stage != 'suspicion'
-        GROUP BY stage, code ORDER BY n DESC
-    """, scope[1]):
-        stages[r["stage"]].append(r)
-
-    suspicions = rows(f"""
-        SELECT code, SUM(count) n FROM rejections
-        WHERE {scope[0]} AND stage = 'suspicion'
-        GROUP BY code ORDER BY n DESC
-    """, scope[1])
-
-    timings = rows(f"""
-        SELECT phase, AVG(duration_ms) avg_ms, MAX(duration_ms) max_ms
-        FROM scan_timings WHERE {scope[0]}
-        GROUP BY phase ORDER BY avg_ms DESC
-    """, scope[1])
-
-    return render_template(
-        "funnel.html", fetched=fetched, stages=stages,
-        suspicions=suspicions, timings=timings, scans=scans,
-        order=["prefilter", "book", "basket", "edge"])
-
-
-@app.route("/fees")
-@login_required
-def fees_view():
-    """
-    Which fee categories actually produce edges.
-
-    The rate runs from 0% on geopolitics to 7% on crypto, so the same
-    gross edge is a trade in one category and a loss in another. Without
-    this, an analyst has to hold the fee table in their head while reading
-    every other page.
-    """
-    scans = request.args.get("scans", 20, type=int)
-
-    if not table_exists("event_verdicts"):
-        return render_template("no_verdicts.html")
-
-    by_fee = rows("""
-        SELECT fee_rate,
-               COUNT(*) analysed,
-               SUM(outcome = 'near_miss') near_misses,
-               SUM(outcome = 'opportunity') opportunities,
-               AVG(net_edge) avg_edge,
-               MAX(net_edge) best_edge,
-               AVG(gross_edge) avg_gross
-        FROM event_verdicts
-        WHERE fee_rate IS NOT NULL
-          AND scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
-        GROUP BY fee_rate ORDER BY fee_rate
-    """, (scans,))
-
-    by_category = rows("""
-        SELECT COALESCE(fee_category, category, 'نامشخص') cat,
-               fee_rate, COUNT(*) n, MAX(net_edge) best_edge
-        FROM event_verdicts
-        WHERE scan_id IN (SELECT id FROM scans ORDER BY id DESC LIMIT ?)
-        GROUP BY cat, fee_rate ORDER BY n DESC LIMIT 25
-    """, (scans,))
-
-    return render_template("fees.html", by_fee=by_fee,
-                           by_category=by_category, scans=scans)
-
-
 # =====================================================================
 # System
 # =====================================================================
@@ -1324,8 +1010,7 @@ def system():
     return render_template("system.html", unit=unit, lines=lines,
                            status=_unit_status(unit),
                            logs=_unit_logs(unit, lines),
-                           db_size=_db_size(),
-                           verdict_rows=_verdict_count())
+                           db_size=_db_size())
 
 
 @app.route("/glossary")
@@ -1344,19 +1029,6 @@ def glossary_page():
 
 def _pages(total):
     return max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-
-
-def _recent_scan_ids():
-    return [r["id"] for r in
-            rows("SELECT id FROM scans ORDER BY id DESC LIMIT 30")]
-
-
-def _codes_in_scope(rejected_only=False):
-    extra = " WHERE outcome = 'rejected'" if rejected_only else ""
-    return rows(f"""
-        SELECT code, COUNT(*) n FROM event_verdicts{extra}
-        GROUP BY code ORDER BY n DESC
-    """)
 
 
 def _run(cmd, timeout=5):
@@ -1395,12 +1067,6 @@ def _db_size():
         return total
     except OSError:
         return None
-
-
-def _verdict_count():
-    if not table_exists("event_verdicts"):
-        return None
-    return one("SELECT COUNT(*) c FROM event_verdicts")["c"]
 
 
 # =====================================================================

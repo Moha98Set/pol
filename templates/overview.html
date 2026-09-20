@@ -28,7 +28,8 @@
   <h2>نزدیک‌ترین بازار به آربیتراژ امروز</h2>
   <div class="body">
     <div style="font-size:16px;margin-bottom:10px">
-      <a href="{{ url_for('market_detail', slug=best.event_slug) }}">{{ best.event_title }}</a>
+      {% if best.url %}<a href="{{ best.url }}" target="_blank" rel="noopener">{{ best.event_title }}</a>
+      {% else %}{{ best.event_title }}{% endif %}
     </div>
     <dl class="dl">
       <dt>مجموع بهترین قیمت‌ها</dt>

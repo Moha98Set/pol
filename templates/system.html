@@ -20,9 +20,6 @@
   <div class="card"><div class="k">اندازه‌ی دیتابیس</div>
     <div class="v num">{% if db_size %}{{ (db_size / 1048576)|fa_num(1) }} MB{% else %}—{% endif %}</div>
     <div class="note">شامل فایل‌های WAL</div></div>
-  <div class="card"><div class="k">ردیف‌های verdict</div>
-    <div class="v num">{% if verdict_rows is not none %}{{ '{:,}'.format(verdict_rows) }}{% else %}—{% endif %}</div>
-    <div class="note">در پنجره‌ی نگه‌داری</div></div>
 </div>
 
 <form class="filters" method="get">
