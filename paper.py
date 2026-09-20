@@ -205,21 +205,30 @@ class Wallet:
         self.unsettled = len(self.open_positions)
 
 
-def entry_latency_ms(num_legs: int) -> int:
+def entry_latency_ms(num_legs: int, base=None, per_leg=None) -> int:
     """
     How long entering actually takes, and therefore how stale the price is
     by the time an order lands.
 
-    Legs are placed one after another, not together, so a wide basket is
-    slower — and a window that a two-leg basket can catch may already be
-    gone for a ten-leg one.
+    The default assumes legs are placed one after another, so a wide
+    basket is slower and a window a two-leg basket can catch may already
+    be gone for a ten-leg one.
+
+    Both terms are overridable per run because they are the floor on how
+    short a window can be traded at all, and that floor is now the only
+    thing standing between us and the short windows — the duration filter
+    that used to be is gone. Setting per_leg to 0 models placing every
+    leg concurrently, which is a different executor, not a faster setting:
+    the replay can say what it would be worth, never deliver it.
     """
-    return (config.PAPER_LATENCY_BASE_MS
-            + config.PAPER_LATENCY_PER_LEG_MS * max(num_legs, 1))
+    base = config.PAPER_LATENCY_BASE_MS if base is None else base
+    per_leg = config.PAPER_LATENCY_PER_LEG_MS if per_leg is None else per_leg
+    return base + per_leg * max(num_legs, 1)
 
 
 def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
            max_per_trade=None, min_capital=None, max_legs=None,
+           latency_base_ms=None, latency_per_leg_ms=None,
            take_everything=False, label=None) -> dict:
     """
     Walk every recorded window in order and decide what a wallet would
@@ -234,13 +243,17 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
     min_capital = (config.PAPER_MIN_CAPITAL if min_capital is None
                    else min_capital)
     max_legs = config.PAPER_MAX_LEGS if max_legs is None else max_legs
+    latency_base_ms = (config.PAPER_LATENCY_BASE_MS if latency_base_ms is None
+                       else latency_base_ms)
+    latency_per_leg_ms = (config.PAPER_LATENCY_PER_LEG_MS
+                          if latency_per_leg_ms is None else latency_per_leg_ms)
 
     params = {
         "cash": cash, "min_window_ms": min_window_ms, "min_edge": min_edge,
         "max_per_trade": max_per_trade, "min_capital": min_capital,
         "max_legs": max_legs, "take_everything": take_everything,
-        "latency_base_ms": config.PAPER_LATENCY_BASE_MS,
-        "latency_per_leg_ms": config.PAPER_LATENCY_PER_LEG_MS,
+        "latency_base_ms": latency_base_ms,
+        "latency_per_leg_ms": latency_per_leg_ms,
     }
 
     cur = db.execute("""
@@ -302,7 +315,7 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
                 continue
 
         # --- entry price: the first tick a real order could have reached
-        latency = entry_latency_ms(legs)
+        latency = entry_latency_ms(legs, latency_base_ms, latency_per_leg_ms)
         ticks = db.execute("""
             SELECT * FROM edge_ticks WHERE window_id = ? ORDER BY ts_ms
         """, (w["id"],)).fetchall()
@@ -591,6 +604,11 @@ def main():
     parser.add_argument("--min-edge", type=float, metavar="PERCENT",
                         help="minimum net edge, in percent")
     parser.add_argument("--max-per-trade", type=float)
+    parser.add_argument("--latency-base", type=float, metavar="MS",
+                        help="fixed part of the execution delay")
+    parser.add_argument("--latency-per-leg", type=float, metavar="MS",
+                        help="per-leg part; 0 models placing every leg at "
+                             "once instead of one after another")
     parser.add_argument("--label")
     parser.add_argument("--compare", action="store_true",
                         help="also replay taking every window, as a control")
@@ -612,6 +630,10 @@ def main():
         kwargs["min_edge"] = args.min_edge / 100.0
     if args.max_per_trade is not None:
         kwargs["max_per_trade"] = args.max_per_trade
+    if args.latency_base is not None:
+        kwargs["latency_base_ms"] = args.latency_base
+    if args.latency_per_leg is not None:
+        kwargs["latency_per_leg_ms"] = args.latency_per_leg
 
     summary = replay(db, label=args.label or "filtered", **kwargs)
     print_run(db, summary)

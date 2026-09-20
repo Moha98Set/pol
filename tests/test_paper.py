@@ -7,6 +7,8 @@ could reach, deploying money the book could not absorb, or spending cash
 it does not have.
 """
 
+import json
+
 import pytest
 
 import config
@@ -766,3 +768,45 @@ def test_the_filter_still_works_when_asked_for(database):
 
 def test_the_default_config_does_not_filter_on_duration():
     assert config.PAPER_MIN_WINDOW_MS == 0
+
+
+def test_placing_legs_at_once_reaches_windows_sequential_placing_cannot(database):
+    """
+    The floor on how short a window can be traded is the execution delay,
+    and most of that delay is the per-leg term. A six-leg basket needs
+    2.2s sequentially and 0.4s concurrently — the difference between
+    missing a 1.5-second window and catching it.
+    """
+    # 8 ticks a quarter-second apart: a 2-second window. Sequential entry
+    # needs 2,200ms and finds nothing; concurrent needs 400ms.
+    add_window(database, legs=6, seconds=8, tick_every=250,
+               edge=0.010, depth=2000.0)
+
+    paper.replay(database, min_capital=1)
+    sequential = database.execute(
+        "SELECT * FROM paper_decisions ORDER BY id DESC LIMIT 1").fetchone()
+
+    paper.replay(database, min_capital=1, latency_per_leg_ms=0)
+    concurrent = database.execute(
+        "SELECT * FROM paper_decisions ORDER BY id DESC LIMIT 1").fetchone()
+
+    assert sequential["taken"] == 0
+    assert sequential["reason"] == paper.SKIP_NO_TICKS
+    assert concurrent["taken"] == 1
+
+
+def test_the_latency_a_run_used_is_stored_with_it(database):
+    """
+    A run's profit means nothing without the assumption behind it, and
+    this one is the strongest assumption in the file.
+    """
+    add_window(database, legs=3, seconds=12)
+
+    summary = paper.replay(database, latency_base_ms=50,
+                           latency_per_leg_ms=0, min_capital=1)
+
+    params = json.loads(database.execute(
+        "SELECT params FROM paper_runs WHERE id = ?",
+        (summary["run_id"],)).fetchone()["params"])
+    assert params["latency_base_ms"] == 50
+    assert params["latency_per_leg_ms"] == 0
