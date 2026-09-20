@@ -201,6 +201,35 @@
 </div>
 {% endif %}
 
+{% if missed and (missed.refused or missed.shrunk) %}
+<div class="panel">
+  <h2>آنچه به‌خاطر کمبود نقد از دست رفت</h2>
+  <div class="body">
+    <div class="cards" style="margin-bottom:14px">
+      <div class="card"><div class="k">فرصت رد شده</div>
+        <div class="v num {{ 'warn' if missed.refused else '' }}">{{ missed.refused or 0 }}</div>
+        <div class="note">پول برای حداقل سبد نبود</div></div>
+      <div class="card"><div class="k">سود از‌دست‌رفته</div>
+        <div class="v num {{ 'warn' if missed.refused_profit else '' }}">{{ missed.refused_profit|money(2) }}</div>
+        <div class="note">اگر نقد کافی بود</div></div>
+      <div class="card"><div class="k">سبد کوچک‌شده</div>
+        <div class="v num">{{ missed.shrunk or 0 }}</div>
+        <div class="note">خریده شد، ولی کمتر از توان دفتر</div></div>
+      <div class="card"><div class="k">سود کم‌شده</div>
+        <div class="v num">{{ missed.shrunk_profit|money(2) }}</div>
+        <div class="note">تفاوت با اندازه‌ی ممکن</div></div>
+    </div>
+    <p class="sub" style="margin:0">
+      ستون دوم سودی است که <strong>اصلاً</strong> به دست نیامد. ستون چهارم سودی که
+      کم‌تر از ممکن به دست آمد، چون سبد به اندازه‌ی نقد موجود کوچک شد — این یکی در
+      فهرست دلایل دیده نمی‌شود، چون به‌صورت یک خرید عادی ثبت می‌شود.
+      <br>
+      جمع این دو می‌گوید بزرگ‌تر کردن کیف چقدر می‌ارزید.
+    </p>
+  </div>
+</div>
+{% endif %}
+
 {{ usage.table(daily, wallet.start_cash) }}
 
 {% if ledger %}

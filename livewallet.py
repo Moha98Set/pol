@@ -273,9 +273,10 @@ class LiveWallet:
                 signal_age_ms, planned_delay_ms, total_ms, signal_edge,
                 entry_edge, signal_sum_asks, entry_sum_asks,
                 fillable_capital, shares, capital, fee, profit,
-                hold_days, annual_pct, signal_leg_skew_ms, entry_leg_skew_ms)
+                hold_days, annual_pct, signal_leg_skew_ms, entry_leg_skew_ms,
+                capped_by, uncapped_capital, uncapped_profit)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?)
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (row.get("at") or utcnow(), row.get("event_slug"),
               row.get("event_title"), row.get("side"),
               row.get("num_outcomes"), row.get("payout"), row.get("fee_rate"),
@@ -287,7 +288,8 @@ class LiveWallet:
               row.get("shares"), row.get("capital"), row.get("fee"),
               row.get("profit"), row.get("hold_days"),
               row.get("annual_pct"), row.get("signal_leg_skew_ms"),
-              row.get("entry_leg_skew_ms")))
+              row.get("entry_leg_skew_ms"), row.get("capped_by"),
+              row.get("uncapped_capital"), row.get("uncapped_profit")))
         self.db.commit()
         return cur.lastrowid
 
@@ -411,10 +413,24 @@ class LiveWallet:
         # file cannot drift away from the engine's own arithmetic.
         fee_per_share = max(payout - sum_asks - edge, 0.0)
 
+        # Three ceilings, and which one binds is worth recording. A trade
+        # the book or the per-trade cap limited is the system working; one
+        # the balance limited is an opportunity the wallet was too small to
+        # take, and those are invisible otherwise — the refusals carry no
+        # size, and a position quietly shrunk to fit the cash still logs as
+        # a plain purchase.
         cost_per_share = sum_asks + fee_per_share
-        shares = min(fillable / sum_asks,
-                     self.max_per_trade / sum_asks,
-                     self.cash / cost_per_share if cost_per_share else 0)
+        by_book = fillable / sum_asks
+        by_cap = self.max_per_trade / sum_asks
+        by_cash = self.cash / cost_per_share if cost_per_share else 0.0
+
+        shares = min(by_book, by_cap, by_cash)
+        affordable = min(by_book, by_cap)      # had the cash been there
+        row["capped_by"] = ("cash" if by_cash < affordable else
+                            "book" if by_book <= by_cap else "max_per_trade")
+        row["uncapped_capital"] = affordable * sum_asks
+        row["uncapped_profit"] = affordable * edge
+
         capital = shares * sum_asks
         fee = shares * fee_per_share
         profit = shares * edge

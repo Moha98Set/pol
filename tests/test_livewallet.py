@@ -645,3 +645,62 @@ def test_a_basket_with_no_leg_prices_still_records_the_position(database):
     legs = json.loads(database.execute(
         "SELECT legs FROM live_positions").fetchone()["legs"])
     assert [l["price"] for l in legs] == [None, None, None]
+
+
+# =====================================================================
+# What an empty wallet costs
+# =====================================================================
+
+
+def test_a_refusal_for_cash_records_what_the_trade_would_have_been(database):
+    """
+    "We could not afford it" is not a finding; "we could not afford $180
+    of edge" is. The refusal has to carry a size or it cannot be added up.
+    """
+    w = wallet(database, priced=priced(fillable=5000.0), min_capital=20,
+               min_annual_pct=0, start_cash=5.0)
+
+    row = w.consider(signal(), FakeWatched())
+
+    assert row["reason"] == livewallet.SKIP_BROKE
+    stored = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert stored["uncapped_capital"] > 20
+    assert stored["uncapped_profit"] > 0
+    assert stored["capped_by"] == "cash"
+
+
+def test_a_basket_shrunk_to_fit_the_balance_says_so(database):
+    """
+    This one is invisible otherwise: it logs as an ordinary purchase, and
+    nothing distinguishes it from a basket the book could not fill larger.
+    """
+    w = wallet(database, priced=priced(fillable=5000.0), min_capital=1,
+               min_annual_pct=0, start_cash=50.0, max_per_trade=1000)
+
+    row = w.consider(signal(), FakeWatched())
+
+    assert row["taken"] == 1
+    stored = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert stored["capped_by"] == "cash"
+    assert stored["uncapped_profit"] > stored["profit"]
+
+
+def test_a_basket_the_book_limited_is_not_blamed_on_the_balance(database):
+    w = wallet(database, priced=priced(fillable=30.0), min_capital=1,
+               min_annual_pct=0, start_cash=10_000.0, max_per_trade=1000)
+
+    w.consider(signal(), FakeWatched())
+
+    stored = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert stored["capped_by"] == "book"
+    assert stored["uncapped_profit"] == pytest.approx(stored["profit"])
+
+
+def test_the_per_trade_cap_is_named_when_it_binds(database):
+    w = wallet(database, priced=priced(fillable=9000.0), min_capital=1,
+               min_annual_pct=0, start_cash=10_000.0, max_per_trade=100)
+
+    w.consider(signal(), FakeWatched())
+
+    stored = database.execute("SELECT * FROM live_decisions").fetchone()
+    assert stored["capped_by"] == "max_per_trade"

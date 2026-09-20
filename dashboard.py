@@ -999,6 +999,25 @@ def live_wallet():
         FROM live_decisions GROUP BY reason ORDER BY n DESC
     """)
 
+    # What an empty wallet cost. Two kinds: baskets refused outright for
+    # cash, and baskets bought smaller than the book would have allowed
+    # because the balance ran out — the second is invisible in the
+    # refusals, since it logs as an ordinary purchase.
+    missed = one("""
+        SELECT
+          SUM(reason = 'not_enough_cash') refused,
+          SUM(CASE WHEN reason = 'not_enough_cash'
+                   THEN COALESCE(uncapped_profit, 0) ELSE 0 END) refused_profit,
+          SUM(CASE WHEN reason = 'not_enough_cash'
+                   THEN COALESCE(uncapped_capital, 0) ELSE 0 END) refused_capital,
+          SUM(taken = 1 AND capped_by = 'cash') shrunk,
+          SUM(CASE WHEN taken = 1 AND capped_by = 'cash'
+                   THEN COALESCE(uncapped_profit, 0) - COALESCE(profit, 0)
+                   ELSE 0 END) shrunk_profit
+        FROM live_decisions
+        WHERE capped_by IS NOT NULL OR reason = 'not_enough_cash'
+    """)
+
     # The measurement this page exists for. The replay assumes a latency;
     # here it was waited out, so these are what it really cost — and how
     # much of the edge was still there afterwards.
@@ -1030,7 +1049,7 @@ def live_wallet():
         page=page, pages=_pages(total), reasons=reasons, taken=taken,
         sortstate=sortstate, positions=positions, ledger=ledger,
         curve=curve, latency=latency, labels=lw.SKIP_LABELS,
-        daily=_daily_usage("live_ledger", "id", "1 = 1"),
+        daily=_daily_usage("live_ledger", "id", "1 = 1"), missed=missed,
         params=fromjson(wallet["params"]) or {})
 
 

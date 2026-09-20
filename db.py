@@ -597,6 +597,14 @@ MIGRATIONS = [
     # matter are the ones the order would have paid, and they are not the
     # ones that raised the signal a second earlier.
     ("live_positions", "legs", "TEXT"),
+    # Which of the three ceilings decided the size, and what the trade
+    # would have been without the cash one. Without these, an opportunity
+    # lost to an empty wallet leaves a refusal with no size on it, and a
+    # position shrunk to fit the balance is indistinguishable from one the
+    # book could not have filled any larger.
+    ("live_decisions", "capped_by", "TEXT"),
+    ("live_decisions", "uncapped_capital", "REAL"),
+    ("live_decisions", "uncapped_profit", "REAL"),
 ]
 
 
