@@ -283,7 +283,19 @@ PAPER_START_CASH = _value("PAPER_START_CASH", 1000.0)
 # is execution latency: roughly 250ms before a signal is believed, ~150ms
 # to refetch the books, then ~300ms per leg placed in sequence. Below a
 # couple of seconds nothing is reachable at all.
-PAPER_MIN_WINDOW_MS = _value("PAPER_MIN_WINDOW_MS", 5000, int)
+# Refuse a window shorter than this. Defaults to 0 — meaning off — because
+# a window's duration is only known once it has closed, and the replay
+# decides at entry. Filtering on it lets the replay trade only the windows
+# it already knows will last, which is information no live system has.
+#
+# The honest equivalent is what both wallets already do: wait out the
+# execution delay and re-price. A window too short to survive that produces
+# no tick to enter on and drops out by itself, without hindsight.
+#
+# Left tunable for research — "what if we could only take long windows" is
+# a fair question — but any run with it above zero carries lookahead bias
+# and cannot be compared against a control run that does not.
+PAPER_MIN_WINDOW_MS = _value("PAPER_MIN_WINDOW_MS", 0, int)
 
 # What entering actually costs in time, and therefore which tick the
 # simulation is allowed to buy at. Buying at the window's best tick would

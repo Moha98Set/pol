@@ -715,3 +715,54 @@ def test_a_flicker_window_is_refused_even_by_the_control_run(database):
     row = database.execute("SELECT * FROM paper_decisions").fetchone()
     assert row["taken"] == 0
     assert row["reason"] == paper.SKIP_FLICKER
+
+
+# =====================================================================
+# Lookahead
+# =====================================================================
+#
+# A window's duration is final only once it has closed. Refusing short
+# windows therefore decides with information the moment did not have, and
+# it was the default here for longer than it should have been.
+
+
+def test_a_short_window_is_not_refused_for_being_short_by_default(database):
+    """
+    Four seconds is under the old 5s default. It has ticks after the
+    execution delay, so a real wallet could have entered it.
+    """
+    add_window(database, legs=2, seconds=4, edge=0.010, depth=2000.0)
+
+    paper.replay(database, min_capital=1)
+
+    row = database.execute("SELECT * FROM paper_decisions").fetchone()
+    assert row["reason"] != paper.SKIP_SHORT
+    assert row["taken"] == 1
+
+
+def test_a_window_too_short_to_reach_still_drops_out_on_its_own(database):
+    """
+    The honest version of the same refusal: no tick exists after the
+    delay, so there is nothing to enter on. No hindsight required.
+    """
+    add_window(database, legs=10, seconds=2, edge=0.010)
+
+    paper.replay(database, min_capital=1)
+
+    row = database.execute("SELECT * FROM paper_decisions").fetchone()
+    assert row["taken"] == 0
+    assert row["reason"] == paper.SKIP_NO_TICKS
+
+
+def test_the_filter_still_works_when_asked_for(database):
+    """Kept for research, so it has to still do what it says."""
+    add_window(database, legs=2, seconds=4, edge=0.010, depth=2000.0)
+
+    paper.replay(database, min_window_ms=5000, min_capital=1)
+
+    row = database.execute("SELECT * FROM paper_decisions").fetchone()
+    assert row["reason"] == paper.SKIP_SHORT
+
+
+def test_the_default_config_does_not_filter_on_duration():
+    assert config.PAPER_MIN_WINDOW_MS == 0

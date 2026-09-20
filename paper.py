@@ -30,6 +30,15 @@ Three rules keep the answer honest
    different problems with different fixes, and only the reasons separate
    them.
 
+4. NEVER DECIDE ON SOMETHING THE MOMENT DID NOT KNOW. A window's duration
+   is only final once it has closed, so refusing short windows lets the
+   replay trade only the ones it already knows will last — which is
+   hindsight, and it was the default here for longer than it should have
+   been. The filter survives as --min-window for research, off by default.
+   A window too short to survive the execution delay produces no tick to
+   enter on and drops out on its own, which is the same answer without
+   borrowing from the future.
+
 What it does not model
 ----------------------
 
@@ -43,7 +52,7 @@ is reported alongside, clearly labelled, as the ceiling it is.
 Run:
     python paper.py                        # replay everything recorded
     python paper.py --cash 5000            # a bigger wallet
-    python paper.py --min-window 10        # only windows over 10s
+    python paper.py --min-window 10        # research only: see rule 4
     python paper.py --compare              # against taking every window
     python paper.py --show 12              # the last run's trades
 """
@@ -74,7 +83,7 @@ SKIP_SMALL = "position_below_minimum"
 SKIP_BROKE = "not_enough_cash"
 
 SKIP_LABELS = {
-    SKIP_SHORT: "پنجره کوتاه‌تر از حداقل",
+    SKIP_SHORT: "پنجره کوتاه‌تر از حداقل (فیلتر آینده‌نگر)",
     SKIP_FLICKER: "پرش تک‌لحظه‌ای — احتمالاً قیمت‌گذاری نیمه‌کاره",
     SKIP_EDGE: "لبه کمتر از آستانه",
     SKIP_LEGS: "پاهای بیش از حد",
@@ -281,7 +290,9 @@ def replay(db, *, cash=None, min_window_ms=None, min_edge=None,
             continue
 
         if not take_everything:
-            if (w["duration_ms"] or 0) < min_window_ms:
+            # Off unless asked for: duration_ms is the closed window's final
+            # length, which nothing knows at entry. See rule 4.
+            if min_window_ms and (w["duration_ms"] or 0) < min_window_ms:
                 row["reason"] = SKIP_SHORT
                 decisions.append(row)
                 continue
@@ -573,7 +584,10 @@ def main():
         description="Paper wallet over recorded windows")
     parser.add_argument("--cash", type=float)
     parser.add_argument("--min-window", type=float, metavar="SECONDS",
-                        help="minimum window length to enter")
+                        help="refuse windows shorter than this. Research "
+                             "only: duration is known only after the window "
+                             "closed, so a run using it has lookahead bias "
+                             "and is not comparable to a control run")
     parser.add_argument("--min-edge", type=float, metavar="PERCENT",
                         help="minimum net edge, in percent")
     parser.add_argument("--max-per-trade", type=float)
@@ -643,6 +657,17 @@ def main():
             print("\n  تفاوت معناداری نداشتند.")
         print("  (سود مطلق بیشتر معمولاً یعنی سرمایه‌ی بیشتری خرج شده،")
         print("   نه اینکه بهتر انتخاب شده — پس مقایسه به ازای دلار است.)")
+
+        # A filtered run using --min-window knows how long each window
+        # turned out to last; the control does not, because
+        # take_everything skips that test. Comparing them then measures
+        # the hindsight as much as the filters.
+        if kwargs.get("min_window_ms"):
+            print()
+            print("  ⚠ این مقایسه منصفانه نیست: اجرای فیلترشده از --min-window")
+            print("    استفاده کرده، که طول نهایی پنجره را می‌داند — چیزی که در")
+            print("    لحظه‌ی خرید معلوم نیست. اجرای کنترل چنین مزیتی ندارد.")
+            print("    برای مقایسه‌ی معتبر، بدون --min-window اجرا کنید.")
 
     db.close()
 
