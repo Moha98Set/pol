@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block title %}پروپوزال — فرصت‌ها در برابر پنجره‌ها{% endblock %}
+{% block body %}
+
+<h1>فرصت‌ها و پنجره‌ها</h1>
+<p class="sub">
+  دو تب که شبیه هم به نظر می‌رسند و یک چیز را اندازه نمی‌گیرند. این صفحه
+  توضیح می‌دهد هرکدام از کجا می‌آید، چه می‌بیند، و چه چیزی را از دست می‌دهد.
+  اعداد زنده‌اند و از همین دیتابیس خوانده می‌شوند.
+</p>
+
+<div class="panel">
+  <h2><i>۱</i>دو موتور مستقل</h2>
+  <div class="body" style="max-width:860px;line-height:1.95">
+    <p style="margin-top:0">
+      این دو تب خروجی دو برنامه‌ی جدا هستند که هم‌زمان کار می‌کنند و هیچ داده‌ای
+      با هم شریک نیستند.
+    </p>
+
+    <div class="chain" style="margin:16px 0">
+      <b>اسکن REST</b><s>←</s><b>همه‌ی بازارها</b><s>←</s>
+      <b>هر {{ (scan_interval // 60) }} دقیقه یک‌بار</b><s>←</s><b>فرصت‌ها</b>
+    </div>
+    <div class="chain" style="margin:0 0 16px">
+      <b>وب‌سوکت</b><s>←</s><b>{{ top_n }} بازار برتر</b><s>←</s>
+      <b>پیوسته، زیر ثانیه</b><s>←</s><b>پنجره‌ها</b>
+    </div>
+
+    <p style="margin-bottom:0">
+      تفاوت بنیادی در <strong>واحد اندازه‌گیری</strong> است: فرصت یک
+      <em>لحظه</em> است، پنجره یک <em>دوره</em>.
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۲</i>عکس در برابر فیلم</h2>
+  <div class="body">
+    {# Both columns neutral on purpose: this page's argument is that the
+       two are complementary, and tinting one of them as the affirmative
+       side would quietly rank them. #}
+    <div class="split">
+      <div class="no">
+        <span class="t">فرصت — یک عکس فوری</span>
+        «در این ثانیه، این سبد <span class="num">۰.۹۸</span> دلار می‌ارزید و
+        <span class="num">۱.۰۰</span> دلار پرداخت تضمینی داشت.»
+        <br><br>
+        هیچ نمی‌گوید چقدر دوام آورد. ممکن است نیم‌ثانیه بعد رفته باشد یا یک ساعت
+        مانده باشد — از روی این ردیف قابل تشخیص نیست.
+      </div>
+      <div class="no">
+        <span class="t">پنجره — یک اپیزود کامل</span>
+        «لبه ساعت <span class="num">۱۰:۰۳</span> وارد محدوده شد، هشت دقیقه ماند،
+        در اوجش <span class="num">۲.۱٪</span> رسید با عمق
+        <span class="num">۴۰</span> دلار، و ساعت <span class="num">۱۰:۱۱</span> بسته شد.»
+        <br><br>
+        طول، عمق، و شکل لحظه‌به‌لحظه‌ی لبه را دارد.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۳</i>هرکدام چه چیزی را نمی‌بیند</h2>
+  <div class="body" style="max-width:860px;line-height:1.95">
+    <p style="margin-top:0">
+      این دو کوری، دقیقاً مکمل هم‌اند — و دلیل اینکه هر دو لازم‌اند.
+    </p>
+
+    <div class="note-block key">
+      <span class="t">کوری فرصت‌ها: هر چیزی که بین دو اسکن اتفاق بیفتد</span>
+      اسکنر هر {{ (scan_interval // 60) }} دقیقه یک‌بار نگاه می‌کند. یک فرصت که
+      ساعت <span class="num">۱۰:۰۳</span> باز شود و <span class="num">۱۰:۱۱</span>
+      بسته شود، کاملاً بین دو نگاه رخ داده و هرگز ثبت نمی‌شود.
+      <br><br>
+      تحلیلگرها همین را گزارش کرده بودند: «فرصت‌هایی هست که چند دقیقه باز می‌مانند.»
+      پنجره‌ها دقیقاً برای دیدن همین ساخته شدند.
+    </div>
+
+    <div class="note-block info">
+      <span class="t">کوری پنجره‌ها: هر بازاری که در {{ top_n }} تای برتر نباشد</span>
+      موتور زنده به سقف اشتراک وب‌سوکت محدود است و فقط نزدیک‌ترین بازارها به
+      آربیتراژ را تماشا می‌کند. اسکنر REST
+      {% if f.scanned %}هر {{ '{:,}'.format(f.scanned) }} بازار{% else %}همه‌ی بازارها{% endif %}
+      را می‌بیند.
+      <br><br>
+      پس فرصتی در بازار شماره‌ی هزارم فقط در تب فرصت‌ها پیدا می‌شود.
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۴</i>آنچه تا امروز ثبت شده</h2>
+  <div class="body">
+    <div class="cards" style="margin-bottom:0">
+      <div class="card"><div class="k">فرصت ثبت‌شده</div>
+        <div class="v num">{{ '{:,}'.format(f.opportunities or 0) }}</div>
+        <div class="note">در {{ '{:,}'.format(f.scans or 0) }} اسکن</div></div>
+      <div class="card"><div class="k">پنجره‌ی بسته‌شده</div>
+        <div class="v num">{{ '{:,}'.format(f.windows or 0) }}</div>
+        <div class="note">شامل نزدیک‌شده‌ها</div></div>
+      <div class="card"><div class="k">پنجره‌ی سیگنال‌شده</div>
+        <div class="v num good">{{ '{:,}'.format(f.crossed or 0) }}</div>
+        <div class="note">از آستانه گذشتند</div></div>
+      <div class="card"><div class="k">میانه‌ی طول سیگنال</div>
+        <div class="v num">{{ f.median_window|duration }}</div>
+        <div class="note">بدون پرش‌های تک‌لحظه‌ای</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۵</i>یک تفاوت که به‌سختی به دست آمد</h2>
+  <div class="body" style="max-width:860px;line-height:1.95">
+    <p style="margin-top:0">
+      اسکنر REST دفتر سفارش همه‌ی پاهای یک سبد را <strong>در یک درخواست و یک
+      لحظه</strong> می‌گیرد. موتور زنده پیام‌به‌پیام می‌گرفت — و سبد را وسط یک
+      به‌روزرسانی قیمت می‌گذاشت، وقتی یک پا جابه‌جا شده بود و دیگری هنوز نه.
+    </p>
+    <p>
+      در بازارهای دوگانه که دو پا آینه‌ی هم‌اند، آن حالت نیمه‌کاره شبیه یک لبه
+      خوانده می‌شود. نتیجه‌اش پنجره‌هایی بود با یک تیک و طول صفر.
+    </p>
+
+    {% if f.flicker %}
+    <div class="note-block key">
+      <span class="t">{{ '{:,}'.format(f.flicker) }} سیگنال تقلبی شناسایی و کنار گذاشته شد</span>
+      این‌ها «پرش تک‌لحظه‌ای» نام گرفتند و از نماهای پیش‌فرض تب پنجره‌ها حذف شده‌اند.
+      داده‌شان پاک نشده — با یک کلیک قابل دیدن است.
+    </div>
+    {% endif %}
+
+    <div class="note-block calm">
+      <span class="t">تب فرصت‌ها هرگز آلوده نشد</span>
+      چون دفترهایش را یک‌جا می‌گیرد، این خطا از اساس برایش ممکن نبود. هر عددی که
+      در آن تب دیده‌ای، از این بابت قابل اتکاست.
+    </div>
+
+    <p style="margin-bottom:0">
+      علت در موتور زنده برطرف شد: حالا همه‌ی پیام‌های یک بسته اول اعمال می‌شوند،
+      بعد قیمت یک بار حساب می‌شود.
+    </p>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۶</i>کدام‌یک به معامله می‌رسد</h2>
+  <div class="body" style="max-width:860px;line-height:1.95">
+    <p style="margin-top:0">
+      نکته‌ای که معمولاً انتظارش نمی‌رود: <strong>هیچ‌کدام از دو کیف پول از تب
+      فرصت‌ها معامله نمی‌کنند.</strong>
+    </p>
+
+    <div class="dl" style="margin:14px 0">
+      <dt>کیف پول زنده</dt><dd>از سیگنال‌های موتور زنده، همان لحظه</dd>
+      <dt>بازپخش</dt><dd>از جدول پنجره‌ها، روی تاریخچه</dd>
+      <dt>تب فرصت‌ها</dt><dd>هیچ‌کس — فقط اطلاعاتی است</dd>
+    </div>
+
+    <p>
+      منطقش این بود که فرصتی که {{ (scan_interval // 60) }} دقیقه پیش دیده شده تا
+      حالا رفته است، پس برای معامله باید زنده دیده شود.
+    </p>
+
+    <div class="note-block info">
+      <span class="t">پیشنهاد برای بررسی بعدی</span>
+      حالا که می‌دانیم بعضی بازارها هفته‌ها باز می‌مانند، آن فرض شاید برای همه‌ی
+      فرصت‌ها درست نباشد. می‌شود سنجید که چند درصد از فرصت‌های ثبت‌شده در اسکن
+      <em>بعدی</em> هنوز وجود داشتند. اگر آن عدد بالا باشد، یک منبع معامله‌ی کامل
+      را بی‌استفاده گذاشته‌ایم.
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <h2><i>۷</i>خلاصه</h2>
+  <div class="scroll">
+    <table>
+      <thead><tr><th></th><th>فرصت‌ها</th><th>پنجره‌ها</th></tr></thead>
+      <tbody>
+        <tr><td>منبع</td><td>اسکن REST</td><td>وب‌سوکت</td></tr>
+        <tr><td>تناوب</td><td>هر {{ (scan_interval // 60) }} دقیقه</td><td>پیوسته، زیر ثانیه</td></tr>
+        <tr><td>پوشش</td><td>همه‌ی بازارها</td><td>{{ top_n }} بازار برتر</td></tr>
+        <tr><td>آستانه‌ی ثبت</td>
+            <td class="num">بالای {{ min_edge|pct(1) }}</td>
+            <td class="num">بالای {{ band|pct(0) }}</td></tr>
+        <tr><td>واحد</td><td>یک لحظه</td><td>یک دوره با طول</td></tr>
+        <tr><td>می‌گوید</td><td>الان چه چیزی قابل معامله است</td>
+            <td>لبه‌ها چطور رفتار می‌کنند</td></tr>
+        <tr><td>نمی‌بیند</td><td>هر چیزی بین دو اسکن</td>
+            <td>بازارهای خارج از {{ top_n }} تای برتر</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

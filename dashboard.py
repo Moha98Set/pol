@@ -1060,6 +1060,55 @@ def system():
                            db_size=_db_size())
 
 
+@app.route("/proposal")
+@login_required
+def proposal():
+    """
+    What the two discovery engines are, and why both exist.
+
+    Written for an analyst who has the tabs in front of them and no reason
+    to know that "opportunities" and "windows" come from different
+    processes measuring different things. The figures are read live rather
+    than written into the prose, because an explainer that quotes numbers
+    it cannot recompute goes stale silently.
+    """
+    def count(sql, params=()):
+        try:
+            row = one(sql, params)
+        except sqlite3.Error:
+            return None
+        return row[0] if row else None
+
+    scans = count("SELECT COUNT(*) FROM scans") or 0
+    figures = {
+        "opportunities": count("SELECT COUNT(*) FROM opportunities"),
+        "scans": scans,
+        "scanned": count("SELECT MAX(events_total) FROM scans"),
+        "windows": count("SELECT COUNT(*) FROM edge_windows "
+                         "WHERE closed_at IS NOT NULL"),
+        "crossed": count(f"SELECT COUNT(*) FROM edge_windows "
+                         f"WHERE crossed = 1 AND NOT {dblib.FLICKER_SQL}"),
+        "flicker": count(f"SELECT COUNT(*) FROM edge_windows "
+                         f"WHERE crossed = 1 AND {dblib.FLICKER_SQL}"),
+        # Flicker excluded, or this page would quote a median of zero and
+        # repeat the distortion it exists to explain: the phantoms are the
+        # majority of crossings and every one of them has no duration.
+        "median_window": count(f"""
+            SELECT duration_ms FROM edge_windows
+            WHERE closed_at IS NOT NULL AND crossed = 1
+              AND NOT {dblib.FLICKER_SQL}
+            ORDER BY duration_ms
+            LIMIT 1 OFFSET (SELECT COUNT(*) / 2 FROM edge_windows
+                            WHERE closed_at IS NOT NULL AND crossed = 1
+                              AND NOT {dblib.FLICKER_SQL})"""),
+    }
+    return render_template("proposal.html", f=figures,
+                           scan_interval=config.SCAN_INTERVAL,
+                           top_n=config.LIVE_TOP_N,
+                           min_edge=config.MIN_NET_EDGE,
+                           band=config.LIVE_RECORD_MIN_EDGE)
+
+
 @app.route("/glossary")
 @login_required
 def glossary_page():
