@@ -704,3 +704,28 @@ def test_the_per_trade_cap_is_named_when_it_binds(database):
 
     stored = database.execute("SELECT * FROM live_decisions").fetchone()
     assert stored["capped_by"] == "max_per_trade"
+
+
+def test_a_book_too_thin_is_not_blamed_on_an_empty_wallet(database):
+    """
+    From the server: reason "not_enough_cash" on a basket the book capped
+    at $8.57, refused against a $20 minimum. No balance would have made
+    that trade possible, and counting it as a cash loss inflates the one
+    number the count exists to get right.
+    """
+    w = wallet(database, priced=priced(fillable=8.57), min_capital=20,
+               min_annual_pct=0, start_cash=14.0)
+
+    row = w.consider(signal(), FakeWatched())
+
+    assert row["reason"] == livewallet.SKIP_SMALL
+
+
+def test_a_wallet_too_small_for_a_fillable_basket_is_blamed_on_cash(database):
+    """The same low balance, but here the book would have allowed it."""
+    w = wallet(database, priced=priced(fillable=5000.0), min_capital=20,
+               min_annual_pct=0, start_cash=14.0)
+
+    row = w.consider(signal(), FakeWatched())
+
+    assert row["reason"] == livewallet.SKIP_BROKE

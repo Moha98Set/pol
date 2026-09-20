@@ -436,8 +436,13 @@ class LiveWallet:
         profit = shares * edge
 
         if capital < self.min_capital:
+            # Blame the balance only when the balance is what stopped it.
+            # Testing self.cash instead put every refusal down to cash
+            # whenever the wallet happened to be low — including baskets
+            # the book could never have filled to the minimum, which is
+            # the opposite of what this count is for.
             row["reason"] = (SKIP_BROKE
-                             if self.cash < self.min_capital + fee
+                             if row["uncapped_capital"] >= self.min_capital
                              else SKIP_SMALL)
             self._record_decision(row)
             return row
