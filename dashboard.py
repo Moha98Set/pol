@@ -889,7 +889,9 @@ def paper_ledger(run_id):
 
     return render_template("paper_ledger.html", run=run, items=items,
                            total=total, page=page, pages=_pages(total),
-                           curve=curve)
+                           curve=curve,
+                           daily=_daily_usage("paper_ledger", "seq",
+                                              "run_id = ?", (run_id,)))
 
 
 PAPER_COLS = {
@@ -902,6 +904,50 @@ PAPER_COLS = {
     "profit":        Col("profit", "سود", "money", step="0.5"),
     "fillable_capital": Col("fillable_capital", "عمق", "money", step="10"),
 }
+
+
+def _daily_usage(table: str, order_col: str, where: str, params=()):
+    """
+    One row per day: what the wallet spent, on how many baskets and legs,
+    what came back, and how much of it was committed at the day's peak.
+
+    The ledger already has every movement, but a movement at a time is the
+    wrong altitude for "how hard is this wallet working" — that question is
+    asked per day, and answering it by eye from fifty rows is how the
+    capital-lockup problem went unnoticed for a week.
+
+    `table` and `order_col` are internal literals, never request input.
+    """
+    return rows(f"""
+        SELECT substr(l.at, 1, 10) day,
+               SUM(CASE WHEN l.kind = 'buy' THEN -l.amount ELSE 0 END) spent,
+               SUM(l.kind = 'buy') buys,
+               SUM(CASE WHEN l.kind = 'buy'
+                        THEN COALESCE(l.num_outcomes, 0) ELSE 0 END) legs,
+               SUM(CASE WHEN l.kind = 'buy'
+                        THEN COALESCE(l.fee, 0) ELSE 0 END) fees,
+               SUM(CASE WHEN l.kind != 'buy' THEN l.amount ELSE 0 END) returned,
+               SUM(l.kind != 'buy') closes,
+               SUM(CASE WHEN l.kind != 'buy'
+                        THEN COALESCE(l.profit, 0) ELSE 0 END) realised,
+               MAX(l.locked_after) peak_locked,
+               MIN(l.balance_after) low_cash,
+               (SELECT x.balance_after FROM {table} x
+                 WHERE {where.replace('l.', 'x.')}
+                   AND substr(x.at, 1, 10) = substr(l.at, 1, 10)
+                 ORDER BY x.{order_col} DESC LIMIT 1) end_cash,
+               (SELECT x.locked_after FROM {table} x
+                 WHERE {where.replace('l.', 'x.')}
+                   AND substr(x.at, 1, 10) = substr(l.at, 1, 10)
+                 ORDER BY x.{order_col} DESC LIMIT 1) end_locked,
+               (SELECT x.equity_after FROM {table} x
+                 WHERE {where.replace('l.', 'x.')}
+                   AND substr(x.at, 1, 10) = substr(l.at, 1, 10)
+                 ORDER BY x.{order_col} DESC LIMIT 1) end_equity
+        FROM {table} l
+        WHERE {where}
+        GROUP BY day ORDER BY day DESC
+    """, tuple(params) * 4)
 
 
 def _paper_labels():
@@ -984,6 +1030,7 @@ def live_wallet():
         page=page, pages=_pages(total), reasons=reasons, taken=taken,
         sortstate=sortstate, positions=positions, ledger=ledger,
         curve=curve, latency=latency, labels=lw.SKIP_LABELS,
+        daily=_daily_usage("live_ledger", "id", "1 = 1"),
         params=fromjson(wallet["params"]) or {})
 
 

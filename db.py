@@ -586,6 +586,12 @@ MIGRATIONS = [
     # at entry. Measured before anything is refused on it.
     ("live_decisions", "signal_leg_skew_ms", "REAL"),
     ("live_decisions", "entry_leg_skew_ms", "REAL"),
+    # How many legs the basket had. On the ledger rather than only on the
+    # decision because "what did this wallet spend its money on" is asked
+    # of the ledger, and a six-leg basket is a different commitment from a
+    # two-leg one at the same dollar amount.
+    ("paper_ledger", "num_outcomes", "INTEGER"),
+    ("live_ledger", "num_outcomes", "INTEGER"),
 ]
 
 

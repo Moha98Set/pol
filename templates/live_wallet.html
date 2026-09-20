@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_sort.html" as sortui %}
+{% import "_usage.html" as usage %}
 {% block title %}کیف پول زنده — داشبورد آربیتراژ{% endblock %}
 {% block body %}
 
@@ -168,13 +169,15 @@
 </div>
 {% endif %}
 
+{{ usage.table(daily, wallet.start_cash) }}
+
 {% if ledger %}
 <div class="panel">
   <h2>آخرین حرکت‌های کیف</h2>
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>زمان</th><th>رویداد</th><th>بازار</th>
+        <th>زمان</th><th>رویداد</th><th>بازار</th><th>پا</th>
         <th>تغییر</th><th>نقد پس از آن</th><th>کل دارایی</th>
       </tr></thead>
       <tbody>
@@ -186,6 +189,7 @@
                  title="پیش از حل‌شدن بازار فروخته شد، چون دفتر دست‌کم به اندازه‌ی نگه‌داشتن پرداخت">فروش زودهنگام</span>
               {% else %}<span class="tag good">تسویه</span>{% endif %}</td>
           <td class="wrap">{{ r.event_title or r.event_slug }}</td>
+          <td class="num">{{ r.num_outcomes or '—' }}</td>
           <td class="num {{ 'good' if r.amount > 0 else '' }}">{{ r.amount|money(2) }}</td>
           <td class="num">{{ r.balance_after|money(2) }}</td>
           <td class="num">{{ r.equity_after|money(2) }}</td>

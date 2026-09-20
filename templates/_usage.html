@@ -1,0 +1,69 @@
+{#
+  Daily wallet usage. Shared by the replay ledger and the live wallet so
+  the two read the same way and one explanation covers both.
+
+  `daily` rows come from _daily_usage(); `size` is the wallet's starting
+  cash, which is what "how much of the wallet" is measured against.
+#}
+{% macro table(daily, size) %}
+{% if daily %}
+<div class="panel">
+  <h2>مصرف کیف، روزبه‌روز</h2>
+  <div class="body" style="border-bottom:1px solid var(--line, var(--border));
+       color:var(--ink-soft, var(--muted));font-size:13px;line-height:1.95">
+    <strong>خرج‌شده</strong> پولی است که آن روز از نقد بیرون رفت — سرمایه به‌علاوه‌ی
+    کارمزد. <strong>برگشتی</strong> آن چیزی که از بازارهای حل‌شده برگشت، با سودش.
+    <br>
+    <strong>بیشترین درگیری</strong> بالاترین مقداری است که در آن روز هم‌زمان
+    قفل بود، به‌صورت نسبتی از کل کیف. اگر مدام نزدیک صد درصد باشد، یعنی کیف پر
+    است و فرصت‌های بعدی را از دست می‌دهیم — محدودیت سرمایه است، نه لبه.
+    <br>
+    <strong>پا</strong> جمع پاهای همه‌ی سبدهای آن روز است. ده دلار روی یک سبد
+    شش‌پایه، شش سفارش است؛ همان ده دلار روی سه سبد دوپایه، شش سفارش روی سه بازار.
+  </div>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">تاریخ</th>
+          <th colspan="4" style="text-align:center">خرید</th>
+          <th colspan="3" style="text-align:center">بسته‌شده</th>
+          <th colspan="3" style="text-align:center">پایان روز</th>
+          <th rowspan="2">بیشترین درگیری</th>
+        </tr>
+        <tr>
+          <th>خرج‌شده</th><th>بازار</th><th>پا</th><th>کارمزد</th>
+          <th>برگشتی</th><th>تعداد</th><th>سود</th>
+          <th>نقد</th><th>قفل</th><th>کل</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in daily %}
+        {% set use = (d.peak_locked / size * 100) if size else 0 %}
+        <tr>
+          <td class="num">{{ d.day }}</td>
+
+          <td class="num">{{ d.spent|money(2) }}</td>
+          <td class="num">{{ d.buys or 0 }}</td>
+          <td class="num">{{ d.legs or 0 }}</td>
+          <td class="num" style="color:var(--amber, var(--warn))">{{ d.fees|money(2) }}</td>
+
+          <td class="num {{ 'good' if d.returned else '' }}">{{ d.returned|money(2) }}</td>
+          <td class="num">{{ d.closes or 0 }}</td>
+          <td class="num {{ 'good' if d.realised and d.realised > 0 else '' }}">{{ d.realised|money(2) }}</td>
+
+          <td class="num">{{ d.end_cash|money(2) }}</td>
+          <td class="num">{{ d.end_locked|money(2) }}</td>
+          <td class="num"><strong>{{ d.end_equity|money(2) }}</strong></td>
+
+          <td class="num {{ 'warn' if use >= 90 else '' }}"
+              title="بیشترین مقدار قفل‌شده در این روز: {{ d.peak_locked|money(2) }}">
+            {{ use|round(1) }}٪</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+{% endmacro %}

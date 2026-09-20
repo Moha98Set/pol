@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_usage.html" as usage %}
 {% block title %}دفتر کیف — اجرای #{{ run.id }}{% endblock %}
 {% block body %}
 
@@ -73,12 +74,14 @@
 </div>
 {% endif %}
 
+{{ usage.table(daily, run.start_cash) }}
+
 <div class="panel">
   <h2>{{ '{:,}'.format(total) }} حرکت</h2>
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>#</th><th>تاریخ</th><th>رویداد</th><th>بازار</th>
+        <th>#</th><th>تاریخ</th><th>رویداد</th><th>بازار</th><th>پا</th>
         <th>تغییر</th><th>سرمایه</th><th>کارمزد</th><th>سود</th>
         <th>نقد</th><th>قفل‌شده</th><th>کل دارایی</th>
       </tr></thead>
@@ -92,6 +95,7 @@
           <td class="wrap">
             {% if r.window_id %}<a href="{{ url_for('window_detail', window_id=r.window_id) }}">{{ r.event_title or r.event_slug }}</a>
             {% else %}{{ r.event_title or '—' }}{% endif %}</td>
+          <td class="num">{{ r.num_outcomes or '—' }}</td>
           <td class="num {{ 'good' if r.amount > 0 else 'bad' }}">
             {{ '+' if r.amount > 0 }}{{ r.amount|money(2) }}</td>
           <td class="num">{{ r.capital|money(2) }}</td>
@@ -102,7 +106,7 @@
           <td class="num"><strong>{{ r.equity_after|money(2) }}</strong></td>
         </tr>
         {% else %}
-        <tr><td colspan="11" class="empty">این اجرا حرکتی در کیف نداشت.</td></tr>
+        <tr><td colspan="12" class="empty">این اجرا حرکتی در کیف نداشت.</td></tr>
         {% endfor %}
       </tbody>
     </table>

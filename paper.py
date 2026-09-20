@@ -138,6 +138,8 @@ class Wallet:
             "event_slug": window["event_slug"] if window is not None else None,
             "event_title": (window["event_title"]
                             if window is not None else None),
+            "num_outcomes": (window["num_outcomes"]
+                             if window is not None else None),
             "capital": capital, "fee": fee, "profit": profit,
             "balance_after": self.cash, "locked_after": self.locked,
             "equity_after": self.equity,
@@ -434,12 +436,12 @@ def _save_ledger(db, run_id: int, entries: list):
     db.executemany("""
         INSERT INTO paper_ledger (run_id, seq, at, kind, window_id,
             event_slug, event_title, amount, capital, fee, profit,
-            balance_after, locked_after, equity_after)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            balance_after, locked_after, equity_after, num_outcomes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, [(run_id, e["seq"], e["at"], e["kind"], e["window_id"],
            e["event_slug"], e["event_title"], e["amount"], e["capital"],
            e["fee"], e["profit"], e["balance_after"], e["locked_after"],
-           e["equity_after"]) for e in entries])
+           e["equity_after"], e.get("num_outcomes")) for e in entries])
     db.commit()
 
 

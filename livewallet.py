@@ -235,15 +235,15 @@ class LiveWallet:
         return self.state["cash"] + self.state["locked"]
 
     def _ledger(self, kind, amount, position_id, slug, title,
-                capital, fee, profit):
+                capital, fee, profit, num_outcomes=None):
         self.db.execute("""
             INSERT INTO live_ledger (at, kind, position_id, event_slug,
                 event_title, amount, capital, fee, profit,
-                balance_after, locked_after, equity_after)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                balance_after, locked_after, equity_after, num_outcomes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (utcnow(), kind, position_id, slug, title, amount,
               capital, fee, profit, self.state["cash"], self.state["locked"],
-              self.equity))
+              self.equity, num_outcomes))
         self.db.commit()
 
     def _record_decision(self, row):
@@ -468,7 +468,8 @@ class LiveWallet:
             s["gross_loss"] += profit
         self._save()
         self._ledger("buy", -(capital + fee), position_id, row["event_slug"],
-                     row["event_title"], capital, fee, profit)
+                     row["event_title"], capital, fee, profit,
+                     row.get("num_outcomes"))
         return position_id
 
     # -----------------------------------------------------------------
@@ -564,7 +565,7 @@ class LiveWallet:
         """, (utcnow(), net, actual, sum_bids, p["id"]))
         self._save()
         self._ledger("sell", net, p["id"], p["event_slug"], p["event_title"],
-                     p["capital"], exit_fee, actual)
+                     p["capital"], exit_fee, actual, p["num_outcomes"])
 
         log.info("PAPER SELL | %s | $%.2f back for a $%.2f cost | "
                  "profit $%.2f (booked $%.2f) | cash $%.2f",
@@ -619,7 +620,7 @@ class LiveWallet:
                 self._save()
                 self._ledger("settle", capital + fee + profit, p["id"],
                              p["event_slug"], p["event_title"],
-                             capital, fee, profit)
+                             capital, fee, profit, p["num_outcomes"])
                 log.info("PAPER SETTLE | %s | +$%.2f (%s) | cash $%.2f",
                          (p["event_title"] or "")[:40],
                          capital + fee + profit, reason, self.cash)
