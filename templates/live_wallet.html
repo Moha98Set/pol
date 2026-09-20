@@ -97,23 +97,55 @@
   <div class="scroll">
     <table>
       <thead><tr>
-        <th>بازار</th><th>سمت</th><th>خریداری شد</th>
-        <th>سرمایه</th><th>کارمزد</th><th>سود قفل‌شده</th><th>تسویه</th>
+        <th>بازار</th><th>سمت</th><th>باز شد</th><th>گذشته</th>
+        <th>سهم</th><th>سرمایه</th><th>کارمزد</th><th>سود قفل‌شده</th><th>تسویه</th>
       </tr></thead>
       <tbody>
         {% for p in positions %}
+        {% set legs = p.legs|fromjson %}
         <tr>
           <td class="wrap">{% if p.url %}<a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.event_title or p.event_slug }}</a>
             {%- else %}{{ p.event_title or p.event_slug }}{% endif %}
             <span class="tag">{{ p.num_outcomes }} پا</span></td>
           <td>{{ 'بله' if p.side == 'yes' else 'نه' }}</td>
-          <td title="{{ p.opened_at }}">{{ p.opened_at|ago }}</td>
+          <td class="num" title="{{ p.opened_at }}">{{ (p.opened_at or '')[:10] }}</td>
+          <td>{{ p.opened_at|ago }}</td>
+          <td class="num">{{ p.shares|fa_num(1) }}</td>
           <td class="num">{{ p.capital|money(2) }}</td>
-          <td class="num" style="color:var(--warn)">{{ p.fee|money(2) }}</td>
+          <td class="num" style="color:var(--amber, var(--warn))">{{ p.fee|money(2) }}</td>
           <td class="num good">{{ p.profit|money(2) }}</td>
           <td class="num">{% if p.end_date %}{{ p.end_date[:10] }}{% else %}
             <span class="tag" title="تاریخ تسویه ثبت نشده؛ تا رسیدن پیام حل‌شدن بازار قفل می‌ماند">نامعلوم</span>{% endif %}</td>
         </tr>
+        {% if legs %}
+        <tr>
+          <td colspan="9" style="padding:0 13px 10px">
+            <details>
+              <summary style="cursor:pointer;color:var(--ink-faint, var(--muted));font-size:13px">
+                پاهایی که خریده شد ({{ legs|length }})
+              </summary>
+              <table style="margin-top:8px;width:auto;min-width:340px">
+                <thead><tr><th>گزینه</th><th>قیمت واحد</th><th>هزینه‌ی این پا</th></tr></thead>
+                <tbody>
+                  {% for l in legs %}
+                  <tr>
+                    <td class="wrap">{{ l.outcome }}</td>
+                    <td class="num">{{ l.price|fa_num(4) }}</td>
+                    <td class="num">{% if l.price and p.shares %}{{ (l.price * p.shares)|money(2) }}{% else %}—{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+              <p class="sub" style="margin:8px 0 0;font-size:12px">
+                قیمت‌ها لحظه‌ی ورود است، نه لحظه‌ی سیگنال. جمعشان
+                <span class="num">{{ p.entry_sum_asks|fa_num(4) }}</span> می‌شود و
+                پرداخت تضمینی سبد <span class="num">{{ p.payout|fa_num(2) }}</span> دلار است —
+                اختلافشان منهای کارمزد، همان سود قفل‌شده است.
+              </p>
+            </details>
+          </td>
+        </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>

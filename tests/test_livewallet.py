@@ -562,3 +562,86 @@ def test_leg_skew_is_recorded_at_signal_and_at_entry(database):
     row = database.execute("SELECT * FROM live_decisions").fetchone()
     assert row["signal_leg_skew_ms"] == pytest.approx(55.0)
     assert row["entry_leg_skew_ms"] == pytest.approx(1234.0)
+
+
+# =====================================================================
+# What the basket was actually made of
+# =====================================================================
+#
+# "We hold $48 of the Swedish election" does not say which outcomes were
+# bought or at what price, and those are the numbers an analyst checks a
+# position against.
+
+
+class FakeWatched(FakeEvent):
+    def __init__(self, slug="ev", end_date=None, names=("A", "B", "C")):
+        super().__init__(slug, end_date)
+        self.legs = [(n, f"{slug}-{n}") for n in names]
+
+
+def priced(edge=0.010, sum_asks=0.990, fillable=500.0, side="yes",
+           leg_asks=(0.30, 0.33, 0.36)):
+    return side, {
+        "sum_best_asks": sum_asks,
+        "num_legs": len(leg_asks),
+        "leg_best_asks": list(leg_asks),
+        "best": {"real_cost": fillable},
+    }, edge
+
+
+def test_each_leg_is_recorded_with_the_price_entry_paid(database):
+    w = wallet(database, priced=priced(), min_capital=1, min_annual_pct=0)
+
+    w.consider(signal(), FakeWatched())
+
+    import json
+    legs = json.loads(database.execute(
+        "SELECT legs FROM live_positions").fetchone()["legs"])
+    assert [l["outcome"] for l in legs] == ["A", "B", "C"]
+    assert [l["price"] for l in legs] == [0.30, 0.33, 0.36]
+
+
+def test_a_no_basket_names_the_side_it_actually_bought(database):
+    """
+    Labelling these "A" would describe a position that is short A as one
+    that is long it.
+    """
+    w = wallet(database, priced=priced(side="no"), min_capital=1,
+               min_annual_pct=0)
+
+    w.consider(signal(side="no"), FakeWatched())
+
+    import json
+    legs = json.loads(database.execute(
+        "SELECT legs FROM live_positions").fetchone()["legs"])
+    assert [l["outcome"] for l in legs] == ["NO A", "NO B", "NO C"]
+
+
+def test_leg_prices_come_from_the_entry_not_the_signal(database):
+    """
+    The signal quoted a cheaper basket; the order would have paid the
+    later price. Storing the signal's would describe orders never placed.
+    """
+    w = wallet(database, priced=priced(leg_asks=(0.40, 0.40, 0.19)),
+               min_capital=1, min_annual_pct=0)
+
+    w.consider(signal(sum_asks=0.900), FakeWatched())
+
+    import json
+    legs = json.loads(database.execute(
+        "SELECT legs FROM live_positions").fetchone()["legs"])
+    assert sum(l["price"] for l in legs) == pytest.approx(0.99)
+
+
+def test_a_basket_with_no_leg_prices_still_records_the_position(database):
+    w = wallet(database, priced=(("yes"), {"sum_best_asks": 0.99,
+               "num_legs": 3, "best": {"real_cost": 500.0}}, 0.010),
+               min_capital=1, min_annual_pct=0)
+
+    row = w.consider(signal(), FakeWatched())
+
+    assert row["taken"] == 1
+    import json
+    legs = json.loads(database.execute(
+        "SELECT legs FROM live_positions").fetchone()["legs"])
+    assert [l["price"] for l in legs] == [None, None, None]

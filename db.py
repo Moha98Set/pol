@@ -592,6 +592,11 @@ MIGRATIONS = [
     # two-leg one at the same dollar amount.
     ("paper_ledger", "num_outcomes", "INTEGER"),
     ("live_ledger", "num_outcomes", "INTEGER"),
+    # Which legs the basket was actually bought from, and at what price
+    # each. JSON, written at entry rather than at signal: the prices that
+    # matter are the ones the order would have paid, and they are not the
+    # ones that raised the signal a second earlier.
+    ("live_positions", "legs", "TEXT"),
 ]
 
 

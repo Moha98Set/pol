@@ -131,6 +131,26 @@ def annual_pct(profit: float, capital: float, days: float):
     return profit / capital * 365.0 / days * 100.0
 
 
+def leg_prices(watched, result, side: str) -> list:
+    """
+    The individual legs behind a basket, at the price entry would have paid.
+
+    Taken from the re-priced entry rather than from the signal: a basket is
+    bought a second or two after the edge appears, and quoting the signal's
+    prices here would describe orders that were never placed. A NO basket's
+    legs are named for the side actually bought, because "Yes" against a
+    position that is short it is the one label that could mislead.
+    """
+    asks = (result or {}).get("leg_best_asks") or []
+    legs = []
+    for i, (name, _token_id) in enumerate(getattr(watched, "legs", []) or []):
+        legs.append({
+            "outcome": f"NO {name}" if side == "no" else name,
+            "price": asks[i] if i < len(asks) else None,
+        })
+    return legs
+
+
 class LiveWallet:
     """
     One wallet, persisted, fed by the live engine's signals.
@@ -424,7 +444,8 @@ class LiveWallet:
 
         position_id = self._buy(row, shares, capital, fee, profit,
                                 signal.get("url"),
-                                getattr(watched, "end_date", None))
+                                getattr(watched, "end_date", None),
+                                leg_prices(watched, result, side))
 
         row.update(taken=1, reason="taken", shares=shares, capital=capital,
                    fee=fee, profit=profit, position_id=position_id)
@@ -438,16 +459,18 @@ class LiveWallet:
                  row["total_ms"] or 0, self.cash)
         return row
 
-    def _buy(self, row, shares, capital, fee, profit, url, end_date) -> int:
+    def _buy(self, row, shares, capital, fee, profit, url, end_date,
+             legs=None) -> int:
         """Caller holds the lock."""
         cur = self.db.execute("""
             INSERT INTO live_positions (opened_at, event_slug, event_title,
                 side, num_outcomes, payout, fee_rate, shares, capital, fee,
-                profit, entry_sum_asks, end_date, url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                profit, entry_sum_asks, end_date, url, legs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (utcnow(), row["event_slug"], row["event_title"], row["side"],
               row["num_outcomes"], row["payout"], row["fee_rate"], shares,
-              capital, fee, profit, row["entry_sum_asks"], end_date, url))
+              capital, fee, profit, row["entry_sum_asks"], end_date, url,
+              json.dumps(legs or [], ensure_ascii=False)))
         position_id = cur.lastrowid
 
         s = self.state
